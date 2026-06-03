@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ============================================================
+     GP → ABC · Convertisseur de tablatures Guitar Pro
+     Version : v1.0  (polyphonie multi-voix/portées, altérations
+     explicites, classification d'instruments par nom prioritaire)
+     ============================================================ -->
+<title>GP → ABC · Convertisseur de tablatures</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- alphaTab : parsing des fichiers Guitar Pro (gp3/gp4/gp5/gpx/gp) -->
+<script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.5.0/dist/alphaTab.min.js"></script>
+<style>
+  :root{
+    --ink:#13110e;
+    --panel:#1c1915;
+    --panel-2:#242019;
+    --line:#3a3329;
+    --paper:#ece3d2;
+    --amber:#e0a14a;
+    --amber-bright:#f2c178;
+    --rust:#c8643c;
+    --muted:#8a7f6d;
+    --green:#8faa6b;
+    --red:#cf6a5a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:'JetBrains Mono',ui-monospace,monospace;
+    background:
+      radial-gradient(120% 80% at 80% -10%, rgba(224,161,74,.10), transparent 60%),
+      radial-gradient(100% 70% at 0% 110%, rgba(200,100,60,.08), transparent 55%),
+      var(--ink);
+    color:var(--paper);
+    min-height:100%;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:48px 24px 80px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:34px}
+  h1{
+    font-family:'Instrument Serif',serif;
+    font-weight:400;font-size:clamp(38px,7vw,72px);
+    line-height:.95;margin:0;letter-spacing:.5px;
+  }
+  h1 em{color:var(--amber);font-style:italic}
+  h1 .ver{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--muted);vertical-align:super;letter-spacing:0;}
+  .sub{color:var(--muted);font-size:13px;max-width:42ch;text-align:right}
+  .sub b{color:var(--amber-bright);font-weight:500}
+
+  /* Dropzone */
+  .drop{
+    position:relative;border:1.5px dashed var(--line);border-radius:14px;
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    padding:48px 28px;text-align:center;cursor:pointer;
+    transition:border-color .2s,background .2s,transform .15s;
+  }
+  .drop:hover{border-color:var(--amber)}
+  .drop.over{border-color:var(--amber-bright);background:linear-gradient(180deg,#2a251c,#322b20);transform:scale(1.005)}
+  .drop .glyph{font-family:'Instrument Serif',serif;font-size:54px;color:var(--amber);line-height:1}
+  .drop .big{font-size:18px;margin:14px 0 6px}
+  .drop .small{color:var(--muted);font-size:13px}
+  .drop .formats{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .pill{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .pill.ok{color:var(--green);border-color:rgba(143,170,107,.4)}
+  .pill.no{color:var(--red);border-color:rgba(207,106,90,.4)}
+  input[type=file]{display:none}
+
+  /* Status */
+  .status{margin-top:18px;min-height:22px;font-size:13px}
+  .status.err{color:var(--red)}
+  .status.ok{color:var(--green)}
+  .status.work{color:var(--amber-bright)}
+
+  /* Result */
+  .result{margin-top:30px;display:none}
+  .result.show{display:block}
+  .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .meta{color:var(--muted);font-size:12px}
+  .meta b{color:var(--paper);font-weight:500}
+  .actions{display:flex;gap:10px}
+  button{
+    font-family:inherit;font-size:13px;cursor:pointer;border-radius:9px;
+    padding:9px 16px;border:1px solid var(--line);background:var(--panel-2);color:var(--paper);
+    transition:.15s;
+  }
+  button:hover{border-color:var(--amber);color:var(--amber-bright)}
+  button.primary{background:var(--amber);color:#241a0c;border-color:var(--amber);font-weight:700}
+  button.primary:hover{background:var(--amber-bright);color:#241a0c}
+  textarea{
+    width:100%;min-height:340px;resize:vertical;margin-top:4px;
+    background:#100e0b;color:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:18px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.7;
+    white-space:pre;overflow:auto;
+  }
+  footer{margin-top:48px;border-top:1px solid var(--line);padding-top:18px;color:var(--muted);font-size:12px}
+  footer a{color:var(--amber)}
+  .tef-note{
+    margin-top:14px;border-left:3px solid var(--rust);background:rgba(200,100,60,.08);
+    padding:12px 16px;border-radius:0 10px 10px 0;font-size:13px;display:none;
+  }
+  .tef-note.show{display:block}
+  .tef-note b{color:var(--amber-bright)}
+  .tef-note a{color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Tab<em>→</em>ABC <span class="ver">v1.0</span></h1>
+    <div class="sub">Convertisseur <b>Guitar Pro</b> vers notation <b>ABC</b>.<br>Tout se passe dans le navigateur — aucun fichier n'est envoyé.</div>
+  </header>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Déposer un fichier">
+    <div class="glyph">♪</div>
+    <div class="big">Dépose un fichier ici ou clique pour parcourir</div>
+    <div class="small">Le fichier reste sur ta machine</div>
+    <div class="formats">
+      <span class="pill ok">.gp3</span>
+      <span class="pill ok">.gp4</span>
+      <span class="pill ok">.gp5</span>
+      <span class="pill ok">.gpx</span>
+      <span class="pill ok">.gp</span>
+      <span class="pill no">.tef</span>
+    </div>
+    <input type="file" id="file" accept=".gp,.gp3,.gp4,.gp5,.gpx,.tef">
+  </div>
+
+  <div class="status" id="status"></div>
+  <div class="tef-note" id="tefnote"></div>
+
+  <div class="result" id="result">
+    <div class="bar">
+      <div class="meta" id="meta"></div>
+      <div class="actions">
+        <button id="copy">Copier</button>
+        <button class="primary" id="dl">Télécharger .abc</button>
+      </div>
+    </div>
+    <textarea id="abc" spellcheck="false" readonly></textarea>
+  </div>
+
+  <footer>
+    Parsing Guitar Pro via <a href="https://alphatab.net" target="_blank" rel="noopener">alphaTab</a>.
+    Conversion ABC : hauteurs, durées, points, n-olets, accords, ornements, mesures, armure réelle,
+    clefs par instrument (guitare en clef de sol octaviée <code>treble-8</code>, basse en <code>bass-8</code>,
+    batterie en clef de percussion), multi-pistes <b>et multi-voix</b> : chaque portée (piano main droite/gauche) et chaque voix d'une mesure devient une voix ABC distincte.
+    Les effets de jeu (bends, slides, hammer-ons…) ne sont pas transcrits.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- utilitaires musicaux ---------- */
+
+function gcd(a, b){ a = Math.abs(a); b = Math.abs(b); while(b){ [a, b] = [b, a % b]; } return a || 1; }
+
+/* --- armure --- */
+const SHARP_ORDER = ['F','C','G','D','A','E','B'];
+const FLAT_ORDER  = ['B','E','A','D','G','C','F'];
+const MAJ_SHARP = ['C','G','D','A','E','B','F#','C#'];
+const MAJ_FLAT  = ['C','F','Bb','Eb','Ab','Db','Gb','Cb'];
+const MIN_SHARP = ['Am','Em','Bm','F#m','C#m','G#m','D#m','A#m'];
+const MIN_FLAT  = ['Am','Dm','Gm','Cm','Fm','Bbm','Ebm','Abm'];
+function keyName(ks, type){
+  ks = Math.max(-7, Math.min(7, ks | 0));
+  const minor = (type === 1 || String(type) === '1' || String(type).toLowerCase() === 'minor');
+  if (ks >= 0) return minor ? MIN_SHARP[ks] : MAJ_SHARP[ks];
+  return minor ? MIN_FLAT[-ks] : MAJ_FLAT[-ks];
+}
+function makeKeyAlter(ks){
+  const map = {C:0,D:0,E:0,F:0,G:0,A:0,B:0};
+  if (ks > 0) for (let i = 0; i < ks; i++) map[SHARP_ORDER[i]] = 1;
+  else if (ks < 0) for (let i = 0; i < -ks; i++) map[FLAT_ORDER[i]] = -1;
+  return l => map[l] || 0;
+}
+
+/* --- hauteurs : sensibles à l'armure + report d'altération dans la mesure --- */
+const NAT_SEMI = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+const SHARP_SPELL = [['C',0],['C',1],['D',0],['D',1],['E',0],['F',0],['F',1],['G',0],['G',1],['A',0],['A',1],['B',0]];
+const FLAT_SPELL  = [['C',0],['D',-1],['D',0],['E',-1],['E',0],['F',0],['G',-1],['G',0],['A',-1],['A',0],['B',-1],['B',0]];
+function symFor(a){ return a > 0 ? '^' : a < 0 ? '_' : '='; }
+
+function spell(midi, ks, keyAlter, state, isGrace){
+  const pc = ((midi % 12) + 12) % 12;
+  const pair = (ks < 0 ? FLAT_SPELL : SHARP_SPELL)[pc];
+  const letter = pair[0], alter = pair[1];
+  const oct = Math.round((midi - alter - NAT_SEMI[letter]) / 12) - 1;
+  const k = letter + oct;
+  let sym = '';
+  const armA = keyAlter(letter);
+  if (isGrace){
+    if (alter !== armA) sym = symFor(alter);
+  } else {
+    // Altération TOUJOURS explicite si elle dévie de l'armure : jamais « cachée » par le
+    // report de mesure (robuste pour les lecteurs/imports qui ne propagent pas l'altération).
+    // + bécarre pour annuler une altération antérieure de même hauteur dans la mesure.
+    const prior = state.has(k) ? state.get(k) : null;
+    let need = (alter !== armA);
+    if (!need && prior !== null && prior !== alter) need = true;
+    if (need) sym = symFor(alter);
+    state.set(k, alter);
+  }
+  let body;
+  if (oct >= 5) body = letter.toLowerCase() + "'".repeat(oct - 5);
+  else body = letter.toUpperCase() + ",".repeat(Math.max(0, 4 - oct));
+  return sym + body;
+}
+
+/* --- classification piste -> clef + décalage d'octave (convention lecture) --- */
+function classify(track){
+  const n = (track.name || '').toLowerCase();
+  const tun = (track.staves[0] && track.staves[0].tuning) || [];
+  const allZero = tun.length > 0 && tun.every(x => x === 0);
+  if (/drum|batter|percu/.test(n) || allZero) return {clef:'perc', shift:0, kind:'percussion'};
+  if (/bass|basse/.test(n) || tun.length === 4) return {clef:'bass-8', shift:12, kind:'basse'};
+  if (/guit|gtr|acoust|électr|electr|rythm|lead/.test(n)) return {clef:'treble-8', shift:12, kind:'guitare'};
+  if (/voix|voice|chant|vocal|flut|flûte|clavier|keyboard|piano|synth|orgue|organ|sax|violon|violin|cello|cuivre|brass|cord|string/.test(n))
+    return {clef:'treble', shift:0, kind:'mélodique'};
+  if (tun.length === 6 && tun[0] >= 62 && tun[0] <= 66) return {clef:'treble-8', shift:12, kind:'guitare'};
+  return {clef:'treble', shift:0, kind:'autre'};
+}
+
+// Longueur ABC d'un beat, relative à L:1/Lden.
+function beatLength(beat, Lden){
+  let dv = Number(beat.duration);
+  if (!isFinite(dv) || dv === 0) dv = 4;
+  const dots = beat.dots || 0;
+  const dotNum = Math.pow(2, dots + 1) - 1;  // 0->1, 1->3, 2->7
+  const dotDen = Math.pow(2, dots);          // 0->1, 1->2, 2->4
+  const tupN = beat.tupletNumerator && beat.tupletNumerator > 0 ? beat.tupletNumerator : 1;
+  const tupD = beat.tupletDenominator && beat.tupletDenominator > 0 ? beat.tupletDenominator : 1;
+
+  // fraction de ronde : base = (dv>0 ? 1/dv : -dv rondes)
+  let num = (dv > 0 ? 1 : -dv) * dotNum * Lden * tupD;
+  let den = (dv > 0 ? dv : 1) * dotDen * tupN;
+
+  const g = gcd(num, den);
+  num /= g; den /= g;
+
+  if (den === 1) return num === 1 ? '' : String(num);
+  return (num === 1 ? '' : String(num)) + '/' + String(den);
+}
+
+function noteMidi(note, staff){
+  if (typeof note.realValue === 'number' && note.realValue > 0) return note.realValue;
+  // repli : accordage de la portée + frette
+  try {
+    const tun = staff.tuning || (staff.stringTuning && staff.stringTuning.tunings);
+    if (tun && tun.length){
+      const idx = (note.string || 1) - 1;
+      const open = tun[idx];
+      if (typeof open === 'number') return open + (note.fret || 0);
+    }
+  } catch(e){}
+  return 60;
+}
+
+function sanitize(s){ return (s || '').replace(/"/g, "'").replace(/[\r\n]+/g, ' ').trim(); }
+
+/* ---------- polyphonie : portées multiples + voix multiples ---------- */
+
+// Rest occupant une mesure entière (M:curN/curD) en unités L:1/Lden.
+function fullBarRest(curN, curD, Lden){
+  let num = curN * Lden, den = curD;
+  const g = gcd(num, den); num /= g; den /= g;
+  const n = (num === 1 ? '' : String(num));
+  return den === 1 ? ('z' + n) : ('z' + n + '/' + String(den));
+}
+
+// Indices des voix réellement utilisées (au moins une note) sur l'ensemble des mesures d'une portée.
+function collectUsedVoices(bars){
+  const used = new Set();
+  bars.forEach(bar => {
+    (bar.voices || []).forEach((v, vi) => {
+      const beats = (v && v.beats) || [];
+      if (beats.some(b => !b.isRest && b.notes && b.notes.length)) used.add(vi);
+    });
+  });
+  if (!used.size) used.add(0);
+  return [...used].sort((a, b) => a - b);
+}
+
+// Clef d'une portée d'après le modèle alphaTab (1re mesure), pour les instruments non frettés (piano…).
+function staffClefName(staff){
+  try{
+    const bar0 = staff && staff.bars && staff.bars[0];
+    if (!bar0) return null;
+    const at = window.alphaTab, Clef = at && at.model && at.model.Clef;
+    const c = bar0.clef;
+    if (Clef){
+      if (c === Clef.G2) return 'treble';
+      if (c === Clef.F4) return 'bass';
+      if (c === Clef.C3) return 'alto';
+      if (c === Clef.C4) return 'tenor';
+      if (c === Clef.Neutral) return 'perc';
+    }
+  }catch(e){}
+  return null;
+}
+
+// Clef + décalage d'octave PAR PORTÉE (les pistes piano ont 2 portées : sol puis fa).
+function classifyStaff(track, staff, si){
+  const n = (track.name || '').toLowerCase();
+  const tun = (staff && staff.tuning) || [];
+  const allZero = tun.length > 0 && tun.every(x => x === 0);
+  // 1) Percussion
+  if (/drum|batter|percu/.test(n) || allZero) return {clef:'perc', shift:0};
+  // 2) Basse (nom ou accordage 4 cordes) — instrument octaviant
+  if (/bass|basse|contrebass/.test(n) || tun.length === 4) return {clef:'bass-8', shift:12};
+  // 3) Instruments NON frettés reconnus par le NOM (vent, voix, clavier, cordes frottées…).
+  //    PRIORITÉ sur l'accordage : en Guitar Pro ces pistes portent souvent un accordage de
+  //    guitare par défaut, qui les ferait passer à tort pour des guitares (octave + clef faux).
+  if (/voix|voice|chant|vocal|choeur|chœur|flut|flûte|fife|piccolo|clarinet|oboe|hautbois|basson|bassoon|sax|trompet|trumpet|cornet|trombone|tuba|\bcor\b|horn|cuivre|brass|clavier|keyboard|piano|rhodes|wurli|synth|orgue|organ|accord|harmonica|violon|violin|viola|cello|violoncelle|string|harpe|\bharp\b|mandolin/.test(n))
+    return {clef:'treble', shift:0};
+  // 4) Guitare par le nom
+  if (/guit|gtr|acoust|électr|electr|rythm|lead|solo|dobro|ukulele|banjo/.test(n))
+    return {clef:'treble-8', shift:12};
+  // 5) Repli : accordage type guitare (6 cordes, corde aiguë ~Mi 64)
+  if (tun.length >= 6 && tun[0] >= 62 && tun[0] <= 66) return {clef:'treble-8', shift:12};
+  const cl = staffClefName(staff);
+  if (cl) return {clef:cl, shift:0};
+  if (track.staves && track.staves.length > 1)
+    return {clef: si === 1 ? 'bass' : 'treble', shift:0};
+  return {clef:'treble', shift:0};
+}
+
+// Nom de voie : « Piste (MD)/(MG) » pour les 2 mains, « v1/v2 » si plusieurs voix sur une portée.
+function laneName(track, nStaves, si, usedVoices, vi){
+  let base = sanitize(track.name) || 'Piste';
+  if (nStaves > 1) base += si === 0 ? ' (MD)' : si === 1 ? ' (MG)' : ' (p' + (si + 1) + ')';
+  if (usedVoices.length > 1) base += ' v' + (vi + 1);
+  return base.replace(/"/g, "'");
+}
+
+// Corps ABC d'UNE mesure pour une voie (portée, voix) donnée.
+function buildBarBody(bar, vi, ctx){
+  const voice = (bar && bar.voices && bar.voices[vi]) ? bar.voices[vi] : null;
+  const beats = voice ? (voice.beats || []) : [];
+  if (!beats.length) return fullBarRest(ctx.curN, ctx.curD, ctx.Lden);
+  const state = new Map();   // report d'altération, remis à zéro à chaque mesure
+  const tokens = [];
+  for (const beat of beats){
+    const g = beat.graceType;
+    const isGrace = g !== undefined && g !== null && String(g) !== '0' && String(g).toLowerCase() !== 'none';
+    if (beat.isRest || !beat.notes || !beat.notes.length){
+      if (isGrace) continue;
+      tokens.push('z' + beatLength(beat, ctx.Lden));
+      continue;
+    }
+    const pitches = beat.notes.map(n => spell(noteMidi(n, ctx.staff) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
+    if (isGrace){ tokens.push('{' + pitches.join('') + '}'); continue; }
+    const len = beatLength(beat, ctx.Lden);
+    let tok = pitches.length === 1 ? pitches[0] + len : '[' + pitches.join('') + ']' + len;
+    if (beat.notes.some(n => n.isTieOrigin)) tok += '-';
+    tokens.push(tok);
+  }
+  if (!tokens.length) return fullBarRest(ctx.curN, ctx.curD, ctx.Lden);
+  return tokens.join('');
+}
+
+/* ---------- conversion score -> ABC ---------- */
+
+function scoreToAbc(score){
+  const Lden = 8;
+  const out = [];
+  const mbars = score.masterBars || [];
+  const mb0 = mbars[0] || {};
+  const tsN = mb0.timeSignatureNumerator || 4;
+  const tsD = mb0.timeSignatureDenominator || 4;
+  const ks = Number(mb0.keySignature) || 0;
+  const keyAlter = makeKeyAlter(ks);
+  const KEY = keyName(ks, mb0.keySignatureType);
+
+  out.push('X:1');
+  out.push('T:' + (sanitize(score.title) || 'Sans titre'));
+  if (sanitize(score.artist)) out.push('C:' + sanitize(score.artist));
+  out.push('M:' + tsN + '/' + tsD);
+  out.push('L:1/' + Lden);
+  out.push('Q:1/4=' + Math.round(score.tempo || 120));
+  out.push('K:' + KEY);
+
+  const tracks = (score.tracks || []).filter(t => t.staves && t.staves.length);
+
+  let vnum = 0;
+  tracks.forEach((track) => {
+    const staves = track.staves || [];
+    staves.forEach((staff, si) => {
+      const bars = staff.bars || [];
+      const usedVoices = collectUsedVoices(bars);
+      // Portée totalement silencieuse : ignorée (sauf si c'est la seule portée de la seule piste).
+      const staffHasNotes = bars.some(b => (b.voices || []).some(v => (v && v.beats || []).some(bt => !bt.isRest && bt.notes && bt.notes.length)));
+      if (!staffHasNotes && !(tracks.length === 1 && staves.length === 1)) return;
+      const cls = classifyStaff(track, staff, si);
+
+      usedVoices.forEach((vi) => {
+        vnum++;
+        out.push('V:' + vnum + ' clef=' + cls.clef + ' name="' + laneName(track, staves.length, si, usedVoices, vi) + '"');
+
+        let curN = tsN, curD = tsD;
+        let lineBars = [];
+        const flush = () => { if (lineBars.length){ out.push(lineBars.join(' | ') + ' |'); lineBars = []; } };
+
+        for (let bi = 0; bi < bars.length; bi++){
+          const bar = bars[bi];
+          const mb = mbars[bi] || mb0;
+          let prefix = '';
+          if (mb.timeSignatureNumerator !== curN || mb.timeSignatureDenominator !== curD){
+            curN = mb.timeSignatureNumerator; curD = mb.timeSignatureDenominator;
+            prefix = '[M:' + curN + '/' + curD + ']';
+          }
+          const body = buildBarBody(bar, vi, {ks, keyAlter, cls, staff, Lden, curN, curD});
+          lineBars.push(prefix + body);
+          if (lineBars.length >= 4) flush();   // 4 mesures par ligne
+        }
+        flush();
+        // PAS de ligne vide entre les voix : en ABC une ligne vide = fin du morceau
+        // (EasyABC, abcm2ps… s'arrêtent là et ignorent les voix suivantes).
+      });
+    });
+  });
+
+  if (!vnum) out.push('% Aucune piste exploitable trouvée dans le fichier.');
+  return out.join('\n').replace(/\n{2,}/g, '\n').trim() + '\n';
+}
+
+/* ---------- chargement alphaTab ---------- */
+
+function loadScore(bytes){
+  const at = window.alphaTab;
+  if (!at) throw new Error("La bibliothèque alphaTab n'est pas chargée (vérifie ta connexion internet).");
+  const loaders = [
+    () => at.importer.ScoreLoader.loadScoreFromBytes(bytes),
+    () => at.ScoreLoader.loadScoreFromBytes(bytes),
+  ];
+  let lastErr;
+  for (const fn of loaders){
+    try { const s = fn(); if (s) return s; }
+    catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('Format non reconnu.');
+}
+
+/* ---------- UI ---------- */
+
+const drop   = document.getElementById('drop');
+const fileEl = document.getElementById('file');
+const statusEl = document.getElementById('status');
+const tefNote  = document.getElementById('tefnote');
+const result = document.getElementById('result');
+const abcEl  = document.getElementById('abc');
+const metaEl = document.getElementById('meta');
+
+let lastName = 'tablature';
+
+function setStatus(msg, cls){ statusEl.className = 'status' + (cls ? ' ' + cls : ''); statusEl.textContent = msg; }
+
+function showTefHelp(name){
+  result.classList.remove('show');
+  tefNote.classList.add('show');
+  tefNote.innerHTML =
+    "<b>Fichier TEF détecté (" + sanitize(name) + ").</b> " +
+    "Le format TablEdit est binaire et propriétaire : aucune bibliothèque navigateur ne le lit de façon fiable. " +
+    "Le plus simple est d'utiliser <a href='https://tabledit.com/tefview/' target='_blank' rel='noopener'>TEFview</a> " +
+    "(gratuit) ou TablEdit, qui exportent directement en ABC via <i>Fichier → Exporter</i>.";
+  setStatus('Conversion TEF non prise en charge ici — voir ci-dessous.', 'err');
+}
+
+function handleFile(file){
+  tefNote.classList.remove('show');
+  if (!file) return;
+  lastName = file.name.replace(/\.[^.]+$/, '');
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+
+  if (ext === 'tef'){ showTefHelp(file.name); return; }
+  if (!['gp','gp3','gp4','gp5','gpx'].includes(ext)){
+    setStatus('Extension non reconnue : .' + ext + ' (formats acceptés : gp3, gp4, gp5, gpx, gp).', 'err');
+    return;
+  }
+
+  setStatus('Lecture de ' + file.name + '…', 'work');
+  const reader = new FileReader();
+  reader.onerror = () => setStatus('Impossible de lire le fichier.', 'err');
+  reader.onload = () => {
+    try {
+      const bytes = new Uint8Array(reader.result);
+      const score = loadScore(bytes);
+      const abc = scoreToAbc(score);
+      abcEl.value = abc;
+      const nbTracks = (score.tracks || []).length;
+      const nbBars = (score.masterBars || []).length;
+      const nbVoices = (abc.match(/^V:/gm) || []).length;
+      metaEl.innerHTML = '<b>' + (sanitize(score.title) || file.name) + '</b> · '
+        + nbTracks + ' piste' + (nbTracks > 1 ? 's' : '') + ' → '
+        + nbVoices + ' voix ABC · '
+        + nbBars + ' mesure' + (nbBars > 1 ? 's' : '');
+      result.classList.add('show');
+      setStatus('Conversion réussie.', 'ok');
+    } catch(e){
+      console.error(e);
+      result.classList.remove('show');
+      setStatus('Échec de la conversion : ' + (e && e.message ? e.message : e), 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+drop.addEventListener('click', () => fileEl.click());
+drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); fileEl.click(); } });
+fileEl.addEventListener('change', () => handleFile(fileEl.files[0]));
+
+['dragenter','dragover'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => { if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+
+document.getElementById('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(abcEl.value); setStatus('Copié dans le presse-papiers.', 'ok'); }
+  catch(e){ abcEl.removeAttribute('readonly'); abcEl.select(); document.execCommand('copy'); abcEl.setAttribute('readonly',''); }
+});
+
+document.getElementById('dl').addEventListener('click', () => {
+  const blob = new Blob([abcEl.value], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = lastName + '.abc';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+window.addEventListener('load', () => {
+  if (!window.alphaTab) setStatus("alphaTab ne s'est pas chargé — vérifie ta connexion puis recharge la page.", 'err');
+});
+</script>
+</body>
+</html>
