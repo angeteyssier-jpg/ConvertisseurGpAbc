@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ============================================================
      GP → ABC · Convertisseur de tablatures Guitar Pro
-     Version : v1.0  (polyphonie multi-voix/portées, altérations
-     explicites, classification d'instruments par nom prioritaire)
+     Version : v1.3  (+ n-olets ABC (p:q:r , ligatures par temps, tempo & armure
+     variables en cours de morceau [Q:]/[K:], paroles w: alignées, symboles d'accords)
      ============================================================ -->
 <title>GP → ABC · Convertisseur de tablatures</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -112,7 +112,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Tab<em>→</em>ABC <span class="ver">v1.0</span></h1>
+    <h1>Tab<em>→</em>ABC <span class="ver">v1.3</span></h1>
     <div class="sub">Convertisseur <b>Guitar Pro</b> vers notation <b>ABC</b>.<br>Tout se passe dans le navigateur — aucun fichier n'est envoyé.</div>
   </header>
 
@@ -147,9 +147,12 @@
 
   <footer>
     Parsing Guitar Pro via <a href="https://alphatab.net" target="_blank" rel="noopener">alphaTab</a>.
-    Conversion ABC : hauteurs, durées, points, n-olets, accords, ornements, mesures, armure réelle,
+    Conversion ABC : hauteurs, durées, points, <b>n-olets</b> <code>(p:q:r</code>, accords, <b>symboles d'accords</b> <code>"Am"</code>,
+    ornements, <b>ligatures par temps</b>, mesures, armure réelle,
     clefs par instrument (guitare en clef de sol octaviée <code>treble-8</code>, basse en <code>bass-8</code>,
     batterie en clef de percussion), multi-pistes <b>et multi-voix</b> : chaque portée (piano main droite/gauche) et chaque voix d'une mesure devient une voix ABC distincte.
+    Structure : <b>reprises</b> <code>|: :|</code>, <b>voltas</b>, <b>repères de section</b>, directions (D.C./D.S./Segno/Coda/Fine),
+    <b>tempo</b> et <b>armure variables</b> en cours de morceau (<code>[Q:]</code>/<code>[K:]</code>), et <b>paroles</b> <code>w:</code> alignées.
     Les effets de jeu (bends, slides, hammer-ons…) ne sont pas transcrits.
   </footer>
 </div>
@@ -228,14 +231,16 @@ function classify(track){
 }
 
 // Longueur ABC d'un beat, relative à L:1/Lden.
-function beatLength(beat, Lden){
+// noTuplet=true : ignore le ratio de n-olet (la mise à l'échelle est portée par
+// le marqueur ABC (p:q:r émis en amont, et non par la durée écrite de chaque note).
+function beatLength(beat, Lden, noTuplet){
   let dv = Number(beat.duration);
   if (!isFinite(dv) || dv === 0) dv = 4;
   const dots = beat.dots || 0;
   const dotNum = Math.pow(2, dots + 1) - 1;  // 0->1, 1->3, 2->7
   const dotDen = Math.pow(2, dots);          // 0->1, 1->2, 2->4
-  const tupN = beat.tupletNumerator && beat.tupletNumerator > 0 ? beat.tupletNumerator : 1;
-  const tupD = beat.tupletDenominator && beat.tupletDenominator > 0 ? beat.tupletDenominator : 1;
+  const tupN = (!noTuplet && beat.tupletNumerator   && beat.tupletNumerator   > 0) ? beat.tupletNumerator   : 1;
+  const tupD = (!noTuplet && beat.tupletDenominator && beat.tupletDenominator > 0) ? beat.tupletDenominator : 1;
 
   // fraction de ronde : base = (dv>0 ? 1/dv : -dv rondes)
   let num = (dv > 0 ? 1 : -dv) * dotNum * Lden * tupD;
@@ -246,6 +251,36 @@ function beatLength(beat, Lden){
 
   if (den === 1) return num === 1 ? '' : String(num);
   return (num === 1 ? '' : String(num)) + '/' + String(den);
+}
+
+// Durée réelle d'un beat en fraction de ronde {num,den} (points + n-olet inclus).
+// Sert au calcul des frontières de temps pour les ligatures (espaces).
+function beatWhole(beat){
+  let dv = Number(beat.duration);
+  if (!isFinite(dv) || dv === 0) dv = 4;
+  const dots = beat.dots || 0;
+  const dotNum = Math.pow(2, dots + 1) - 1, dotDen = Math.pow(2, dots);
+  const tupN = beat.tupletNumerator   && beat.tupletNumerator   > 0 ? beat.tupletNumerator   : 1;
+  const tupD = beat.tupletDenominator && beat.tupletDenominator > 0 ? beat.tupletDenominator : 1;
+  let num = (dv > 0 ? 1 : -dv) * dotNum * tupD;
+  let den = (dv > 0 ? dv : 1) * dotDen * tupN;
+  const g = gcd(num, den);
+  return { num: num / g, den: den / g };
+}
+
+// Syllabe ABC (w:) attachée à un beat ; '*' si aucune (avance d'une note sans texte).
+function lyricOf(beat){
+  try{
+    const ls = beat.lyrics;
+    if (ls && ls.length){
+      let s = ls[0];
+      if (typeof s === 'string'){
+        s = s.replace(/\|/g, '/').replace(/\s+/g, '~').trim();   // | et espaces interdits dans une syllabe
+        if (s) return s;
+      }
+    }
+  }catch(e){}
+  return '*';
 }
 
 function noteMidi(note, staff){
@@ -339,33 +374,197 @@ function laneName(track, nStaves, si, usedVoices, vi){
   return base.replace(/"/g, "'");
 }
 
-// Corps ABC d'UNE mesure pour une voie (portée, voix) donnée.
+// Corps ABC d'UNE mesure pour une voie (portée, voix).
+// Retourne { body, syll } : body = chaîne ABC ; syll = une syllabe par note émise
+// (silences exclus), dans l'ordre, pour construire la ligne w: alignée.
 function buildBarBody(bar, vi, ctx){
   const voice = (bar && bar.voices && bar.voices[vi]) ? bar.voices[vi] : null;
   const beats = voice ? (voice.beats || []) : [];
-  if (!beats.length) return fullBarRest(ctx.curN, ctx.curD, ctx.Lden);
+  const syll = [];
+  if (!beats.length) return { body: fullBarRest(ctx.curN, ctx.curD, ctx.Lden), syll };
   const state = new Map();   // report d'altération, remis à zéro à chaque mesure
-  const tokens = [];
-  for (const beat of beats){
-    const g = beat.graceType;
-    const isGrace = g !== undefined && g !== null && String(g) !== '0' && String(g).toLowerCase() !== 'none';
-    if (beat.isRest || !beat.notes || !beat.notes.length){
-      if (isGrace) continue;
-      tokens.push('z' + beatLength(beat, ctx.Lden));
+  const isDead = n => n && (n.isDead === true || (n.type && /dead/i.test(String(n.type))));
+  const graceOf = b => { const g = b && b.graceType; return g !== undefined && g !== null && String(g) !== '0' && String(g).toLowerCase() !== 'none'; };
+  // Prochain beat "sonnant" (ni ornement, ni mort) dans la mesure -> liste de MIDI (pour valider une liaison).
+  const nextSounding = (i) => {
+    for (let j = i + 1; j < beats.length; j++){
+      const b = beats[j];
+      if (graceOf(b)) continue;
+      if (b.isRest) return null;                 // un silence interrompt la liaison
+      const ns = (b.notes || []).filter(n => !isDead(n));
+      if (ns.length) return ns.map(n => noteMidi(n, ctx.staff));
+    }
+    return undefined;                            // fin de mesure -> liaison possible par-dessus la barre
+  };
+
+  // Début d'un groupe de n-olet sur le beat i (beats d'ornement ignorés) -> {p,q,r} ou null.
+  // p notes dans le temps de q, sur les r prochains beats : marqueur ABC "(p:q:r".
+  const tupletStart = (i) => {
+    const b = beats[i];
+    const p = b.tupletNumerator | 0;
+    if (!(p > 1)) return null;
+    const q = (b.tupletDenominator | 0) || 2;
+    let pj = i - 1; while (pj >= 0 && graceOf(beats[pj])) pj--;
+    const prev = pj >= 0 ? beats[pj] : null;
+    let grp = null, prevGrp = null;
+    try { grp = b.tupletGroup || null; } catch(e){}
+    if (prev) { try { prevGrp = prev.tupletGroup || null; } catch(e){} }
+    const cont = prev && ((prev.tupletNumerator | 0) === p)
+              && (((prev.tupletDenominator | 0) || 2) === q)
+              && (grp ? prevGrp === grp : true);
+    if (cont) return null;                        // on est au milieu d'un groupe déjà ouvert
+    let rem = 0; for (let j = i; j < beats.length; j++){ if (!graceOf(beats[j])) rem++; }
+    let r;
+    if (grp && grp.beats && grp.beats.length){ r = Math.min(grp.beats.length, rem); }
+    else {
+      r = 0;
+      for (let j = i; j < beats.length; j++){
+        if (graceOf(beats[j])) continue;
+        if (((beats[j].tupletNumerator | 0) === p) && (((beats[j].tupletDenominator | 0) || 2) === q)) r++;
+        else break;
+      }
+    }
+    return { p, q, r };
+  };
+
+  // Position rythmique dans la mesure (fraction de ronde) -> frontières de temps pour les ligatures.
+  let posNum = 0, posDen = 1;
+  const beatUnit = ctx.curD;   // un temps = 1/curD de ronde
+  const advance = (beat) => {
+    const w = beatWhole(beat);
+    let n = posNum * w.den + w.num * posDen;
+    let d = posDen * w.den;
+    const g = gcd(n, d) || 1; posNum = n / g; posDen = d / g;
+  };
+  const atBeatBoundary = () => (posNum * beatUnit) % posDen === 0;
+
+  let outStr = '';
+  let tupLeft = 0;
+
+  for (let i = 0; i < beats.length; i++){
+    const beat = beats[i];
+    const isGrace = graceOf(beat);
+    // Les notes mortes (« x ») d'un ornement n'ont pas de hauteur réelle -> on les retire.
+    const notes = isGrace ? (beat.notes || []).filter(n => !isDead(n)) : (beat.notes || []);
+
+    // Ouverture d'un n-olet (sur beat sonnant, hors ornement).
+    if (!isGrace && tupLeft === 0){
+      const t = tupletStart(i);
+      if (t){ outStr += '(' + t.p + ':' + t.q + ':' + t.r; tupLeft = t.r; }
+    }
+    const inTup = !isGrace && tupLeft > 0;
+
+    if (beat.isRest || !notes.length){
+      if (isGrace) continue;                     // ornement vide / mort -> ignoré
+      outStr += 'z' + beatLength(beat, ctx.Lden, inTup);
+      advance(beat);
+      if (tupLeft > 0) tupLeft--;
+      if (tupLeft === 0 && atBeatBoundary() && i < beats.length - 1) outStr += ' ';
       continue;
     }
-    const pitches = beat.notes.map(n => spell(noteMidi(n, ctx.staff) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
-    if (isGrace){ tokens.push('{' + pitches.join('') + '}'); continue; }
-    const len = beatLength(beat, ctx.Lden);
+
+    const pitches = notes.map(n => spell(noteMidi(n, ctx.staff) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
+    if (isGrace){ outStr += '{' + pitches.join('') + '}'; continue; }
+
+    // Symbole d'accord (diagramme nommé en Guitar Pro) -> "Am", "Cmaj7"…
+    let chordSym = '';
+    try { const ch = beat.chord; if (ch && ch.name) chordSym = '"' + sanitize(ch.name) + '"'; } catch(e){}
+
+    const len = beatLength(beat, ctx.Lden, inTup);
     let tok = pitches.length === 1 ? pitches[0] + len : '[' + pitches.join('') + ']' + len;
-    if (beat.notes.some(n => n.isTieOrigin)) tok += '-';
-    tokens.push(tok);
+    // Liaison de tenue : uniquement si une hauteur liée se retrouve sur le beat suivant
+    // (sinon la note tenue chevauche d'autres notes -> pas de liaison erronée vers une autre note).
+    const ties = notes.filter(n => n.isTieOrigin).map(n => noteMidi(n, ctx.staff));
+    if (ties.length){
+      const nxt = nextSounding(i);
+      if (nxt === undefined || (nxt && ties.some(m => nxt.indexOf(m) >= 0))) tok += '-';
+    }
+    outStr += chordSym + tok;
+    syll.push(lyricOf(beat));                     // une syllabe par note émise
+
+    advance(beat);
+    if (tupLeft > 0) tupLeft--;
+    if (tupLeft === 0 && atBeatBoundary() && i < beats.length - 1) outStr += ' ';
   }
-  if (!tokens.length) return fullBarRest(ctx.curN, ctx.curD, ctx.Lden);
-  return tokens.join('');
+  if (!outStr) return { body: fullBarRest(ctx.curN, ctx.curD, ctx.Lden), syll };
+  return { body: outStr, syll };
+}
+
+/* ---------- structure : reprises, voltas, repères de section, directions ---------- */
+
+// Mappe une direction (D.C./D.S./Segno/Coda/Fine) vers une décoration ABC. Défensif :
+// si l'énum n'est pas résoluble (valeur numérique), on n'émet rien plutôt qu'une sortie erronée.
+function dirMap(d){
+  const s = String(d).toLowerCase();
+  if (!s || /^\d+$/.test(s)) return '';
+  if (s.includes('dacapo'))  return s.includes('coda') ? 'D.C.alcoda' : (s.includes('fine') ? 'D.C.alfine' : 'D.C.');
+  if (s.includes('dalsegno') || (s.includes('segno') && s.includes('jump')))
+                             return s.includes('coda') ? 'D.S.alcoda' : (s.includes('fine') ? 'D.S.alfine' : 'D.S.');
+  if (s.includes('coda'))    return 'coda';
+  if (s.includes('segno'))   return 'segno';
+  if (s.includes('fine'))    return 'fine';
+  return '';
+}
+
+// Lit la structure d'une mesure depuis l'en-tête (master bar) alphaTab — avec repli sur les
+// noms de PyGuitarPro pour rester robuste : reprise ouvrante/fermante, volta, repère, directions.
+function barStruct(mb){
+  if (!mb) return {open:false, close:false, volta:0, section:'', dirs:[]};
+  const open  = !!(mb.isRepeatStart || mb.isRepeatOpen);
+  const rc    = mb.repeatCount || mb.repeatClose || 0;
+  const close = rc > 0;
+  let volta = 0;
+  const ae = (mb.alternateEndings !== undefined) ? mb.alternateEndings : mb.repeatAlternative;
+  if (typeof ae === 'number' && ae > 0){ for (let b = 0; b < 8; b++){ if (ae & (1 << b)){ volta = b + 1; break; } } }
+  let section = '';
+  const sec = mb.section;
+  if (sec && (sec.text || sec.marker)) section = sec.text || sec.marker;
+  else if (mb.marker && (mb.marker.title || mb.marker.text)) section = mb.marker.title || mb.marker.text;
+  const dirs = [];
+  const D = mb.directions;
+  if (D){
+    let arr = [];
+    if (Array.isArray(D)) arr = D;
+    else if (typeof D[Symbol.iterator] === 'function') { try { arr = [...D]; } catch(e){} }
+    else if (typeof D.values === 'function') { try { arr = [...D.values()]; } catch(e){} }
+    arr.forEach(d => { const m = dirMap(d); if (m && dirs.indexOf(m) < 0) dirs.push(m); });
+  }
+  return {open, close, volta, section: String(section || '').trim(), dirs};
 }
 
 /* ---------- conversion score -> ABC ---------- */
+
+// Carte barIndex -> tempo (bpm) pour les changements de tempo en cours de morceau.
+// Cherche d'abord l'automation de tempo de la master bar, puis scanne les beats (1re piste).
+function buildTempoMap(score){
+  const map = {};
+  const at = window.alphaTab;
+  let TEMPO = null;
+  try { TEMPO = at && at.model && at.model.AutomationType && at.model.AutomationType.Tempo; } catch(e){}
+  const isTempo = (a) => {
+    if (!a) return false;
+    if (TEMPO != null && a.type === TEMPO) return true;
+    return /tempo/i.test(String(a.type));
+  };
+  (score.masterBars || []).forEach((mb, bi) => {
+    try { const ta = mb.tempoAutomation; if (ta && typeof ta.value === 'number') map[bi] = Math.round(ta.value); } catch(e){}
+  });
+  const t0 = (score.tracks || [])[0];
+  const bars0 = (t0 && t0.staves && t0.staves[0] && t0.staves[0].bars) || [];
+  bars0.forEach((bar, bi) => {
+    if (map[bi] != null) return;
+    for (const v of (bar.voices || [])){
+      for (const bt of (v.beats || [])){
+        for (const a of (bt.automations || [])){
+          if (isTempo(a) && typeof a.value === 'number'){ map[bi] = Math.round(a.value); break; }
+        }
+        if (map[bi] != null) break;
+      }
+      if (map[bi] != null) break;
+    }
+  });
+  return map;
+}
 
 function scoreToAbc(score){
   const Lden = 8;
@@ -375,15 +574,16 @@ function scoreToAbc(score){
   const tsN = mb0.timeSignatureNumerator || 4;
   const tsD = mb0.timeSignatureDenominator || 4;
   const ks = Number(mb0.keySignature) || 0;
-  const keyAlter = makeKeyAlter(ks);
   const KEY = keyName(ks, mb0.keySignatureType);
+  const headerTempo = Math.round(score.tempo || 120);
+  const tempoMap = buildTempoMap(score);
 
   out.push('X:1');
   out.push('T:' + (sanitize(score.title) || 'Sans titre'));
   if (sanitize(score.artist)) out.push('C:' + sanitize(score.artist));
   out.push('M:' + tsN + '/' + tsD);
   out.push('L:1/' + Lden);
-  out.push('Q:1/4=' + Math.round(score.tempo || 120));
+  out.push('Q:1/4=' + headerTempo);
   out.push('K:' + KEY);
 
   const tracks = (score.tracks || []).filter(t => t.staves && t.staves.length);
@@ -401,27 +601,62 @@ function scoreToAbc(score){
 
       usedVoices.forEach((vi) => {
         vnum++;
+        const firstLane = (vnum === 1);   // repères de section uniquement sur la 1re voix (portée du haut)
         out.push('V:' + vnum + ' clef=' + cls.clef + ' name="' + laneName(track, staves.length, si, usedVoices, vi) + '"');
 
-        let curN = tsN, curD = tsD;
-        let lineBars = [];
-        const flush = () => { if (lineBars.length){ out.push(lineBars.join(' | ') + ' |'); lineBars = []; } };
-
+        let curN = tsN, curD = tsD, curKs = ks, curTempo = headerTempo;
+        const units = [];
+        const sylls = [];      // syllabes par mesure (alignées aux notes émises)
+        let hasLyr = false;
         for (let bi = 0; bi < bars.length; bi++){
-          const bar = bars[bi];
           const mb = mbars[bi] || mb0;
-          let prefix = '';
+          const st = barStruct(mb);
+          const prev = bi > 0 ? barStruct(mbars[bi-1] || mb0) : null;
+          // Barre entrante : reprises (|: , :| , :|: ) + volta accolée
+          let sep;
+          if (bi === 0) sep = st.open ? '|:' : '';
+          else if (prev.close && st.open) sep = ':|:';
+          else if (prev.close) sep = ':|';
+          else if (st.open) sep = '|:';
+          else sep = '|';
+          if (st.volta) sep = (sep || '|') + st.volta;
+          // Armure de la mesure (peut changer en cours de morceau) -> spelling correct + [K:] inline.
+          const barKs = (typeof mb.keySignature === 'number') ? mb.keySignature : ks;
+          const barKeyAlter = makeKeyAlter(barKs);
+          // Préfixe : métrique + armure + tempo + repère de section + directions
+          let pre = '';
           if (mb.timeSignatureNumerator !== curN || mb.timeSignatureDenominator !== curD){
             curN = mb.timeSignatureNumerator; curD = mb.timeSignatureDenominator;
-            prefix = '[M:' + curN + '/' + curD + ']';
+            pre += '[M:' + curN + '/' + curD + ']';
           }
-          const body = buildBarBody(bar, vi, {ks, keyAlter, cls, staff, Lden, curN, curD});
-          lineBars.push(prefix + body);
-          if (lineBars.length >= 4) flush();   // 4 mesures par ligne
+          if (barKs !== curKs){ pre += '[K:' + keyName(barKs, mb.keySignatureType) + ']'; curKs = barKs; }
+          if (firstLane){
+            const bt = tempoMap[bi];
+            if (typeof bt === 'number' && bt !== curTempo){ pre += '[Q:1/4=' + bt + ']'; curTempo = bt; }
+          }
+          if (firstLane && st.section) pre += '"^' + st.section.replace(/"/g, "'") + '"';
+          st.dirs.forEach(d => { pre += '!' + d + '!'; });
+          const r = buildBarBody(bars[bi], vi, {ks: barKs, keyAlter: barKeyAlter, cls, staff, Lden, curN, curD});
+          units.push((sep ? sep + ' ' : '') + pre + r.body);
+          sylls.push(r.syll);
+          if (r.syll.some(s => s !== '*')) hasLyr = true;
         }
-        flush();
-        // PAS de ligne vide entre les voix : en ABC une ligne vide = fin du morceau
-        // (EasyABC, abcm2ps… s'arrêtent là et ignorent les voix suivantes).
+        const lastSt = barStruct(mbars[bars.length-1] || mb0);
+        const endBar = lastSt.close ? ' :|' : ' |';
+        // 4 mesures par ligne ; la barre finale termine la dernière ligne.
+        // Si la voix porte des paroles, une ligne w: suit chaque ligne de musique (barres alignées).
+        for (let k = 0; k < units.length; k += 4){
+          let line = units.slice(k, k + 4).join(' ');
+          if (k + 4 >= units.length) line += endBar;
+          out.push(line);
+          if (hasLyr){
+            const seg = sylls.slice(k, k + 4)
+              .map(a => (a.length ? a.join(' ') : '*'))
+              .join(' | ');
+            out.push('w: ' + seg);
+          }
+        }
+        // PAS de ligne vide entre les voix : en ABC une ligne vide = fin du morceau.
       });
     });
   });
