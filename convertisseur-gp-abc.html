@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ============================================================
      GP → ABC · Convertisseur de tablatures Guitar Pro
-     Version : v1.5  (+ détection automatique de l'armure quand le fichier GP n'en fournit pas)
+     Version : v1.6  (+ annotations d'effets : bend "^bend=<demi-tons>", vibrato, harmonique,
+     note morte, slide ; regroupement des portées via %%score)
      ============================================================ -->
 <title>GP → ABC · Convertisseur de tablatures</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -111,7 +112,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Tab<em>→</em>ABC <span class="ver">v1.5</span></h1>
+    <h1>Tab<em>→</em>ABC <span class="ver">v1.6</span></h1>
     <div class="sub">Convertisseur <b>Guitar Pro</b> vers notation <b>ABC</b>.<br>Tout se passe dans le navigateur — aucun fichier n'est envoyé.</div>
   </header>
 
@@ -154,7 +155,7 @@
     <b>tempo</b> et <b>armure variables</b> en cours de morceau (<code>[Q:]</code>/<code>[K:]</code>), et <b>paroles</b> <code>w:</code> alignées. <b>Armure déduite des notes</b> si le fichier GP n'en précise pas (fréquent sur les tabs).
     Expression : <b>nuances</b> <code>!p!…!f!</code>, <b>articulations</b> (staccato, accent, marcato, fermata) et <b>legato</b>
     (hammer-on / pull-off / slide → liaisons de phrasé <code>( )</code>).
-    Les bends et le vibrato (micro-intervalles) ne sont pas transcrits.
+    Effets annotés en texte au-dessus de la note : <b>bend</b> <code>"^bend=2"</code> (demi-tons, suffixe <code>;r</code> si relâché), <b>vibrato</b>, <b>harmonique</b>, <b>note morte</b> <code>"^x"</code>, <b>slide</b>. La hauteur reste celle de la case (l'ABC standard ne note pas les micro-intervalles).
   </footer>
 </div>
 
@@ -345,6 +346,49 @@ function isLegatoSlide(n){
   } catch(e){}
   const s = String(t).toLowerCase();
   return /shift|legato/.test(s);   // si l'énum n'est pas résoluble, on ne se fie qu'au nom
+}
+
+function atModel(name){ try { return window.alphaTab && window.alphaTab.model && window.alphaTab.model[name]; } catch(e){ return null; } }
+
+// Annotations d'effets (stratégie A : on conserve la hauteur frettée et on signale l'effet en
+// texte au-dessus de la note). Le bend est encodé de façon ANALYSABLE par script :
+// "^bend=<demi-tons>"  (ex. "^bend=2" = monter d'un ton ; suffixe ";r" = bend puis relâché).
+// alphaTab stocke la valeur de bend en quarts de ton -> demi-tons = valeur/2.
+function effectAnnotations(beat, notes){
+  let s = '';
+  // --- bend : pic maximal sur les notes du beat ---
+  let peak = 0, releases = false;
+  notes.forEach(n => {
+    if (n.hasBend && n.bendPoints && n.bendPoints.length){
+      const vals = n.bendPoints.map(p => (+p.value || 0));
+      const mx = Math.max.apply(null, vals);
+      if (mx > peak) peak = mx;
+      if (vals[vals.length - 1] < mx) releases = true;
+    }
+  });
+  if (peak > 0) s += '"^bend=' + String(peak / 2) + (releases ? ';r' : '') + '"';
+  // --- vibrato ---
+  let vib = !!(beat.vibrato && beat.vibrato !== 0);
+  if (!vib) vib = notes.some(n => n.vibrato && n.vibrato !== 0);
+  if (vib) s += '"^vib"';
+  // --- harmonique ---
+  if (notes.some(n => n.harmonicType && n.harmonicType !== 0)) s += '"^harm"';
+  // --- note morte / étouffée (on garde la hauteur et on la marque) ---
+  if (notes.some(n => n.isDead === true)) s += '"^x"';
+  // --- slides non liés (les « shift »/« legato » sont déjà rendus en liaison de phrasé) ---
+  const SI = atModel('SlideInType'), SO = atModel('SlideOutType');
+  let up = false, down = false;
+  notes.forEach(n => {
+    const si = n.slideInType, so = n.slideOutType;
+    if (si && SI){ if (si === SI.IntoFromBelow) up = true; else if (si === SI.IntoFromAbove) down = true; }
+    if (so && SO){
+      if (so === SO.OutUp || so === SO.PickSlideUp) up = true;
+      else if (so === SO.OutDown || so === SO.PickSlideDown) down = true;
+    }
+  });
+  if (up) s += '"^sl.up"';
+  if (down) s += '"^sl.dn"';
+  return s;
 }
 
 // Décorations d'expression d'un beat (hors legato), dans l'ordre : nuance, articulation, fermata.
@@ -540,6 +584,8 @@ function buildBarBody(bar, vi, ctx){
 
     // Décorations d'expression (nuance changeante, staccato, accent/marcato, fermata).
     const decos = exprDecos(beat, notes, ctx.dyn);
+    // Annotations d'effets de jeu (bend/vibrato/harmonique/note morte/slide) — stratégie texte.
+    const effAnn = effectAnnotations(beat, notes);
 
     // Liaison de phrasé (legato) : ouvre avant ce beat s'il enchaîne et qu'une note suit dans la mesure.
     let openHere = false;
@@ -557,8 +603,8 @@ function buildBarBody(bar, vi, ctx){
       const nxt = nextSounding(i);
       if (nxt === undefined || (nxt && ties.some(m => nxt.indexOf(m) >= 0))) tok += '-';
     }
-    // Ordre ABC : [ouverture legato]["accord"][décorations][note]
-    outStr += (openHere ? '(' : '') + chordSym + decos + tok;
+    // Ordre ABC : [ouverture legato]["accord"][annotations effets][décorations][note]
+    outStr += (openHere ? '(' : '') + chordSym + effAnn + decos + tok;
     // Ferme la liaison de phrasé sur le 1er beat qui n'enchaîne plus.
     if (slurOpen && !legatoOut(beat)){ outStr += ')'; slurOpen = false; }
     syll.push(lyricOf(beat));                     // une syllabe par note émise
@@ -714,8 +760,10 @@ function scoreToAbc(score){
   const tracks = (score.tracks || []).filter(t => t.staves && t.staves.length);
 
   let vnum = 0;
+  const scoreGroups = [];   // pour %%score : un groupe de n° de voix par piste (accolade si >1)
   tracks.forEach((track) => {
     const staves = track.staves || [];
+    const trackVnums = [];
     staves.forEach((staff, si) => {
       const bars = staff.bars || [];
       const usedVoices = collectUsedVoices(bars);
@@ -726,6 +774,7 @@ function scoreToAbc(score){
 
       usedVoices.forEach((vi) => {
         vnum++;
+        trackVnums.push(vnum);
         const firstLane = (vnum === 1);   // repères de section uniquement sur la 1re voix (portée du haut)
         out.push('V:' + vnum + ' clef=' + cls.clef + ' name="' + laneName(track, staves.length, si, usedVoices, vi) + '"');
 
@@ -787,7 +836,19 @@ function scoreToAbc(score){
         // PAS de ligne vide entre les voix : en ABC une ligne vide = fin du morceau.
       });
     });
+    if (trackVnums.length) scoreGroups.push(trackVnums);
   });
+
+  // %%score : regroupe toutes les portées en un seul système (accolade {} pour les voix d'une
+  // même piste, crochet [] autour de l'ensemble). Inséré juste avant la 1re ligne V:.
+  if (vnum >= 2){
+    const groups = scoreGroups.map(g => g.length > 1
+      ? '{' + g.map(v => 'V' + v).join(' ') + '}'
+      : 'V' + g[0]);
+    const directive = '%%score [' + groups.join(' ') + ']';
+    const vidx = out.findIndex(l => l.indexOf('V:') === 0);
+    if (vidx >= 0) out.splice(vidx, 0, directive); else out.push(directive);
+  }
 
   if (!vnum) out.push('% Aucune piste exploitable trouvée dans le fichier.');
   return out.join('\n').replace(/\n{2,}/g, '\n').trim() + '\n';
