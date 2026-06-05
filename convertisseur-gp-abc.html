@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ============================================================
      GP → ABC · Convertisseur de tablatures Guitar Pro
-     Version : v1.4  (+ nuances !p!..!f!, articulations staccato/accent/marcato/fermata,
-     legato hammer-on/pull-off/slide -> liaisons de phrasé ( ) )
+     Version : v1.5  (+ détection automatique de l'armure quand le fichier GP n'en fournit pas)
      ============================================================ -->
 <title>GP → ABC · Convertisseur de tablatures</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -112,7 +111,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Tab<em>→</em>ABC <span class="ver">v1.4</span></h1>
+    <h1>Tab<em>→</em>ABC <span class="ver">v1.5</span></h1>
     <div class="sub">Convertisseur <b>Guitar Pro</b> vers notation <b>ABC</b>.<br>Tout se passe dans le navigateur — aucun fichier n'est envoyé.</div>
   </header>
 
@@ -152,7 +151,7 @@
     clefs par instrument (guitare en clef de sol octaviée <code>treble-8</code>, basse en <code>bass-8</code>,
     batterie en clef de percussion), multi-pistes <b>et multi-voix</b> : chaque portée (piano main droite/gauche) et chaque voix d'une mesure devient une voix ABC distincte.
     Structure : <b>reprises</b> <code>|: :|</code>, <b>voltas</b>, <b>repères de section</b>, directions (D.C./D.S./Segno/Coda/Fine),
-    <b>tempo</b> et <b>armure variables</b> en cours de morceau (<code>[Q:]</code>/<code>[K:]</code>), et <b>paroles</b> <code>w:</code> alignées.
+    <b>tempo</b> et <b>armure variables</b> en cours de morceau (<code>[Q:]</code>/<code>[K:]</code>), et <b>paroles</b> <code>w:</code> alignées. <b>Armure déduite des notes</b> si le fichier GP n'en précise pas (fréquent sur les tabs).
     Expression : <b>nuances</b> <code>!p!…!f!</code>, <b>articulations</b> (staccato, accent, marcato, fermata) et <b>legato</b>
     (hammer-on / pull-off / slide → liaisons de phrasé <code>( )</code>).
     Les bends et le vibrato (micro-intervalles) ne sont pas transcrits.
@@ -649,6 +648,44 @@ function buildTempoMap(score){
   return map;
 }
 
+// Déduit l'armure (nb de dièses/bémols, -7..+7) à partir des notes réellement jouées :
+// on choisit la tonalité majeure dont la gamme couvre le plus de notes (le moins d'altérations
+// accidentelles). Sert quand le fichier GP ne renseigne pas d'armure (très fréquent sur les tabs).
+function inferKeyFromNotes(score){
+  const counts = new Array(12).fill(0);
+  (score.tracks || []).forEach(track => {
+    (track.staves || []).forEach((staff, si) => {
+      if (classifyStaff(track, staff, si).clef === 'perc') return;   // exclut la batterie
+      (staff.bars || []).forEach(bar => {
+        (bar.voices || []).forEach(voice => {
+          (voice.beats || []).forEach(beat => {
+            if (beat.isRest) return;
+            (beat.notes || []).forEach(n => {
+              if (n && n.isDead === true) return;
+              const m = noteMidi(n, staff);
+              if (typeof m === 'number') counts[((m % 12) + 12) % 12]++;
+            });
+          });
+        });
+      });
+    });
+  });
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (total < 12) return 0;   // trop peu d'info pour décider
+  // [armure, tonique majeure (pitch class)]
+  const cand = [[0,0],[1,7],[2,2],[3,9],[4,4],[5,11],[6,6],[7,1],[-1,5],[-2,10],[-3,3],[-4,8],[-5,1],[-6,6],[-7,11]];
+  const scaleOf = t => [0,2,4,5,7,9,11].map(x => (t + x) % 12);
+  let best = 0, bestScore = Infinity;
+  for (const [ks, t] of cand){
+    const sc = scaleOf(t);
+    let out = 0;
+    for (let pc = 0; pc < 12; pc++) if (counts[pc] && sc.indexOf(pc) < 0) out += counts[pc];
+    const s = out + Math.abs(ks) * 0.01;   // à égalité, préfère l'armure la plus simple
+    if (s < bestScore){ bestScore = s; best = ks; }
+  }
+  return best;
+}
+
 function scoreToAbc(score){
   const Lden = 8;
   const out = [];
@@ -656,7 +693,11 @@ function scoreToAbc(score){
   const mb0 = mbars[0] || {};
   const tsN = mb0.timeSignatureNumerator || 4;
   const tsD = mb0.timeSignatureDenominator || 4;
-  const ks = Number(mb0.keySignature) || 0;
+  const fileKs = Number(mb0.keySignature) || 0;
+  // Beaucoup de tabs GP ne renseignent pas l'armure (toutes les mesures en Do/0) : on la déduit
+  // alors des notes, ce qui évite une avalanche d'altérations accidentelles à la lecture.
+  const autoKs = (fileKs === 0) ? inferKeyFromNotes(score) : 0;
+  const ks = (fileKs !== 0) ? fileKs : autoKs;
   const KEY = keyName(ks, mb0.keySignatureType);
   const headerTempo = Math.round(score.tempo || 120);
   const tempoMap = buildTempoMap(score);
@@ -668,6 +709,7 @@ function scoreToAbc(score){
   out.push('L:1/' + Lden);
   out.push('Q:1/4=' + headerTempo);
   out.push('K:' + KEY);
+  if (fileKs === 0 && autoKs !== 0) out.push('% Armure déduite des notes (le fichier GP n\'en précisait pas).');
 
   const tracks = (score.tracks || []).filter(t => t.staves && t.staves.length);
 
@@ -704,8 +746,10 @@ function scoreToAbc(score){
           else if (st.open) sep = '|:';
           else sep = '|';
           if (st.volta) sep = (sep || '|') + st.volta;
-          // Armure de la mesure (peut changer en cours de morceau) -> spelling correct + [K:] inline.
-          const barKs = (typeof mb.keySignature === 'number') ? mb.keySignature : ks;
+          // Armure de la mesure : valeur du fichier, ou armure effective (déduite) si le fichier
+          // ne renseigne rien (toutes mesures à 0). Corrige le spelling ET émet [K:] aux changements.
+          const rawKs = (typeof mb.keySignature === 'number') ? mb.keySignature : 0;
+          const barKs = (fileKs === 0 && rawKs === 0) ? ks : rawKs;
           const barKeyAlter = makeKeyAlter(barKs);
           // Préfixe : métrique + armure + tempo + repère de section + directions
           let pre = '';
