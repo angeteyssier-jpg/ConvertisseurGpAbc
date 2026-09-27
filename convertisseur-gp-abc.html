@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ============================================================
      GP → ABC · Convertisseur de tablatures Guitar Pro
-     Version : v1.12  (batterie à la DISPOSITION MUSESCORE, la même que SaisieABC 4.584 : grosse caisse
+     Version : v1.13  (batterie Guitar Pro 6/7/8 : le numéro de frappe est l'index d'une articulation du kit,
+     traduit en son General MIDI par son OutputMidiNumber ; l'index 0 (caisse claire) n'est plus perdu).
+     Détail v1.12 : (batterie à la DISPOSITION MUSESCORE, la même que SaisieABC 4.584 : grosse caisse
      sur Fa4, caisse claire Do5, charleston Sol5 en croix, ride Fa5, crash La5, toms de Fa5 à Sol4 ;
      deux instruments à la même place se distinguent par l'altération (^g charleston ouvert...).
      Détail v1.11 : correction d'octave des pistes de FLÛTE notées une octave trop bas :
@@ -120,7 +122,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Tab<em>→</em>ABC <span class="ver">v1.12</span></h1>
+    <h1>Tab<em>→</em>ABC <span class="ver">v1.13</span></h1>
     <div class="sub">Convertisseur <b>Guitar Pro</b> vers notation <b>ABC</b>.<br>Tout se passe dans le navigateur — aucun fichier n'est envoyé.</div>
   </header>
 
@@ -351,6 +353,22 @@ const PERC_TABLE = {
   59: ['^d',  'x'],             // ride 2
 };
 const PERC_NAMES = {35:'grosse caisse',36:'grosse caisse',37:'side stick',38:'caisse claire',39:'clap',40:'caisse claire élec.',41:'tom basse',42:'charley fermé',43:'tom basse',44:'charley pied',45:'tom bas',46:'charley ouvert',47:'tom méd-bas',48:'tom méd-haut',49:'crash',50:'tom haut',51:'ride',52:'china',53:'cloche ride',54:'tambourin',55:'splash',56:'cowbell',57:'crash 2',59:'ride 2'};
+
+// Son General MIDI d'une frappe de batterie (v1.13).
+// Guitar Pro 3-5 : realValue EST le numéro GM. Guitar Pro 6/7/8 (.gpx, .gp) : realValue est l'INDEX
+// d'une articulation du kit de la piste (0 = caisse claire, 3 = charleston fermé, 8 = grosse caisse...) ;
+// le son GM est alors l'OutputMidiNumber de cette articulation (track.percussionArticulations).
+// L'index 0 est valide : la v1.12 l'écartait (m > 0) et perdait toute la caisse claire.
+function percGm(n, track){
+  const v = n ? n.realValue : null;
+  const arts = track && track.percussionArticulations;
+  if (arts && arts.length){
+    const idx = (n && typeof n.percussionArticulation === 'number' && n.percussionArticulation >= 0) ? n.percussionArticulation : v;
+    const a = (typeof idx === 'number') ? arts[idx] : null;
+    if (a && typeof a.outputMidiNumber === 'number' && a.outputMidiNumber > 0) return a.outputMidiNumber;
+  }
+  return (typeof v === 'number' && v > 0) ? v : null;
+}
 
 // Assigne une note ABC unique à chaque son GM utilisé (table, ou note libre en repli).
 function buildPercAssign(usedGm){
@@ -664,7 +682,7 @@ function buildBarBody(bar, vi, ctx){
     // Les notes mortes (« x ») d'un ornement n'ont pas de hauteur réelle -> on les retire.
     let notes = isGrace ? (beat.notes || []).filter(n => !isDead(n)) : (beat.notes || []);
     // Batterie : on ne garde que les frappes dont le son GM est mappé (les autres -> silence).
-    if (ctx.perc && ctx.percNote) notes = notes.filter(n => ctx.percNote(n.realValue) != null);
+    if (ctx.perc && ctx.percNote) notes = notes.filter(n => ctx.percNote(n) != null);
 
     // Ouverture d'un n-olet (sur beat sonnant, hors ornement).
     if (!isGrace && tupLeft === 0){
@@ -685,7 +703,7 @@ function buildBarBody(bar, vi, ctx){
     }
 
     const pitches = (ctx.perc && ctx.percNote)
-      ? notes.map(n => ctx.percNote(n.realValue))
+      ? notes.map(n => ctx.percNote(n))
       : notes.map(n => spell(noteMidi(n, ctx.staff) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
     // Grace note : on accumule ses hauteurs ; le groupe {…} sera accolé à la prochaine note réelle.
     if (isGrace){
@@ -927,9 +945,9 @@ function scoreToAbc(score){
         if (isPerc){
           const usedGm = new Set();
           bars.forEach(bar => (bar.voices || []).forEach(v => (v.beats || []).forEach(bt =>
-            (bt.notes || []).forEach(n => { const m = n.realValue; if (typeof m === 'number' && m > 0) usedGm.add(m); }))));
+            (bt.notes || []).forEach(n => { const m = percGm(n, track); if (m != null) usedGm.add(m); }))));
           const assign = buildPercAssign(usedGm);
-          percNote = (gm) => { const a = assign.get(gm); return a ? a.abc : null; };
+          percNote = (n) => { const a = assign.get(percGm(n, track)); return a ? a.abc : null; };   // reçoit la NOTE (v1.13)
           Array.from(usedGm).sort((a, b) => a - b).forEach(gm => {
             const a = assign.get(gm); if (!a) return;
             out.push('%%percmap ' + a.abc + ' ' + gm + (a.head ? ' ' + a.head : '') + (PERC_NAMES[gm] ? '   % ' + PERC_NAMES[gm] : ''));
