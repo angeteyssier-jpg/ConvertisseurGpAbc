@@ -5,8 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ============================================================
      GP → ABC · Convertisseur de tablatures Guitar Pro
-     Version : v1.6  (+ annotations d'effets : bend "^bend=<demi-tons>", vibrato, harmonique,
-     note morte, slide ; regroupement des portées via %%score)
+     Version : v1.12  (batterie à la DISPOSITION MUSESCORE, la même que SaisieABC 4.584 : grosse caisse
+     sur Fa4, caisse claire Do5, charleston Sol5 en croix, ride Fa5, crash La5, toms de Fa5 à Sol4 ;
+     deux instruments à la même place se distinguent par l'altération (^g charleston ouvert...).
+     Détail v1.11 : correction d'octave des pistes de FLÛTE notées une octave trop bas :
+     une portée de la famille flûte (nom ou programme GM 72-79), en clef mélodique non octaviée,
+     dont toute la tessiture reste sous Do5 ET descend sous Do4 est remontée d'une octave.
+     Corrige « Flute 3-4 » de Stairway (Fa2..Mi4 -> Fa3..Mi5, aligné sur « Flute 1-2 ») sans
+     toucher les pistes correctes. Détail v1.10 : frette négative sur une vraie corde (donnée
+     GP3 invalide vue sur des appogiatures) ramenée à la corde à vide -> la mesure 26 redonne un
+     si au lieu d'un la#. La batterie (string/fret = -1, realValue = n° GM) n'est pas affectée.)
      ============================================================ -->
 <title>GP → ABC · Convertisseur de tablatures</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -112,7 +120,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Tab<em>→</em>ABC <span class="ver">v1.6</span></h1>
+    <h1>Tab<em>→</em>ABC <span class="ver">v1.12</span></h1>
     <div class="sub">Convertisseur <b>Guitar Pro</b> vers notation <b>ABC</b>.<br>Tout se passe dans le navigateur — aucun fichier n'est envoyé.</div>
   </header>
 
@@ -148,14 +156,14 @@
   <footer>
     Parsing Guitar Pro via <a href="https://alphatab.net" target="_blank" rel="noopener">alphaTab</a>.
     Conversion ABC : hauteurs, durées, points, <b>n-olets</b> <code>(p:q:r</code>, accords, <b>symboles d'accords</b> <code>"Am"</code>,
-    ornements, <b>ligatures par temps</b>, mesures, armure réelle,
+    <b>grace notes</b> (acciaccatura <code>{/..}</code> / appoggiature <code>{..}</code>), <b>ligatures par temps</b>, mesures, armure réelle,
     clefs par instrument (guitare en clef de sol octaviée <code>treble-8</code>, basse en <code>bass-8</code>,
-    batterie en clef de percussion), multi-pistes <b>et multi-voix</b> : chaque portée (piano main droite/gauche) et chaque voix d'une mesure devient une voix ABC distincte.
+    batterie en clef de percussion avec <b>%%percmap</b> + <b>%%MIDI drummap</b> : chaque son GM placé à sa position MuseScore avec sa tête (croix, losange, triangle…) et rejoué correctement), multi-pistes <b>et multi-voix</b> : chaque portée (piano main droite/gauche) et chaque voix d'une mesure devient une voix ABC distincte.
     Structure : <b>reprises</b> <code>|: :|</code>, <b>voltas</b>, <b>repères de section</b>, directions (D.C./D.S./Segno/Coda/Fine),
     <b>tempo</b> et <b>armure variables</b> en cours de morceau (<code>[Q:]</code>/<code>[K:]</code>), et <b>paroles</b> <code>w:</code> alignées. <b>Armure déduite des notes</b> si le fichier GP n'en précise pas (fréquent sur les tabs).
     Expression : <b>nuances</b> <code>!p!…!f!</code>, <b>articulations</b> (staccato, accent, marcato, fermata) et <b>legato</b>
     (hammer-on / pull-off / slide → liaisons de phrasé <code>( )</code>).
-    Effets annotés en texte au-dessus de la note : <b>bend</b> <code>"^bend=2"</code> (demi-tons, suffixe <code>;r</code> si relâché), <b>vibrato</b>, <b>harmonique</b>, <b>note morte</b> <code>"^x"</code>, <b>slide</b>. La hauteur reste celle de la case (l'ABC standard ne note pas les micro-intervalles).
+    Effets annotés en texte au-dessus de la note : <b>bend</b> <code>"^bend=2"</code> (demi-tons, suffixe <code> rel</code> si relâché), <b>vibrato</b>, <b>harmonique</b>, <b>note morte</b> <code>"^x"</code>, <b>slide</b>. La hauteur reste celle de la case (l'ABC standard ne note pas les micro-intervalles).
   </footer>
 </div>
 
@@ -286,20 +294,76 @@ function lyricOf(beat){
 }
 
 function noteMidi(note, staff){
-  if (typeof note.realValue === 'number' && note.realValue > 0) return note.realValue;
+  // Frette négative sur une vraie corde (string>0) : donnée GP3 invalide (vue sur des appogiatures),
+  // où realValue = corde_à_vide + frette donne un demi-ton trop bas. On ramène à la corde à vide.
+  // NB : on exclut la batterie (string<=0, frette<0 normaux, realValue = n° GM à préserver).
+  if (typeof note.realValue === 'number' && note.realValue > 0){
+    if (typeof note.fret === 'number' && note.fret < 0 && typeof note.string === 'number' && note.string > 0){
+      return note.realValue - note.fret;   // fret<0 -> ajoute |fret| pour revenir à la frette 0
+    }
+    return note.realValue;
+  }
   // repli : accordage de la portée + frette
   try {
     const tun = staff.tuning || (staff.stringTuning && staff.stringTuning.tunings);
     if (tun && tun.length){
       const idx = (note.string || 1) - 1;
       const open = tun[idx];
-      if (typeof open === 'number') return open + (note.fret || 0);
+      if (typeof open === 'number') return open + Math.max(0, note.fret || 0);
     }
   } catch(e){}
   return 60;
 }
 
 function sanitize(s){ return (s || '').replace(/"/g, "'").replace(/[\r\n]+/g, ' ').trim(); }
+
+/* ---------- percussion : %%percmap (position + tête) et %%MIDI drummap (son) ---------- */
+
+// Son General MIDI (canal 10) -> [note ABC, tête] : DISPOSITION MUSESCORE (kit par défaut de
+// MuseScore, share/instruments/instruments.xml), la même que SaisieABC depuis sa 4.584.
+// Deux instruments à la même place se distinguent par l'altération de la note (^g charleston ouvert,
+// ^f tom aigu, _f cloche de ride...). Sans risque : la voix de batterie est en K:C et chaque frappe
+// écrit sa note entière, altération comprise.
+const PERC_TABLE = {
+  35: ['E',   ''],              // grosse caisse 2
+  36: ['F',   ''],              // grosse caisse
+  37: ['^c',  'slashed'],       // side stick (tête barrée)
+  38: ['c',   ''],              // caisse claire
+  39: ['C',   'x'],             // clap (hors kit MuseScore : sous la portée)
+  40: ['_c',  'slash'],         // caisse claire électronique (trait oblique)
+  41: ['G',   ''],              // tom basse grave
+  42: ['g',   'x'],             // charley fermé
+  43: ['A',   ''],              // tom basse aigu
+  44: ['D',   'x'],             // charley au pied
+  45: ['B',   ''],              // tom grave
+  46: ['^g',  'circle-x'],      // charley ouvert
+  47: ['d',   ''],              // tom médium grave
+  48: ['e',   ''],              // tom médium aigu
+  49: ['a',   'x'],             // crash 1
+  50: ['^f',  ''],              // tom aigu
+  51: ['f',   'x'],             // ride 1
+  52: ['^b',  'x-hat'],         // china (croix à chapeau)
+  53: ['_f',  'diamond'],       // cloche de ride
+  54: ['_e',  'diamond'],       // tambourin
+  55: ["c'",  'x'],             // splash
+  56: ['^e',  'triangle-down'], // cloche (cowbell)
+  57: ['b',   'x'],             // crash 2
+  59: ['^d',  'x'],             // ride 2
+};
+const PERC_NAMES = {35:'grosse caisse',36:'grosse caisse',37:'side stick',38:'caisse claire',39:'clap',40:'caisse claire élec.',41:'tom basse',42:'charley fermé',43:'tom basse',44:'charley pied',45:'tom bas',46:'charley ouvert',47:'tom méd-bas',48:'tom méd-haut',49:'crash',50:'tom haut',51:'ride',52:'china',53:'cloche ride',54:'tambourin',55:'splash',56:'cowbell',57:'crash 2',59:'ride 2'};
+
+// Assigne une note ABC unique à chaque son GM utilisé (table, ou note libre en repli).
+function buildPercAssign(usedGm){
+  const assign = new Map();
+  const taken = new Set();
+  const pool = ['B,','A,','G,','F,',"d'","e'","f'","g'","a'","b'"];   // hors de la table : sous et au-dessus de la portée
+  Array.from(usedGm).sort((a, b) => a - b).forEach(gm => {
+    const ent = PERC_TABLE[gm];
+    if (ent && !taken.has(ent[0])){ assign.set(gm, { abc: ent[0], head: ent[1] }); taken.add(ent[0]); }
+    else { const free = pool.find(p => !taken.has(p)) || 'c'; assign.set(gm, { abc: free, head: '' }); taken.add(free); }
+  });
+  return assign;
+}
 
 /* ---------- expression : nuances, articulations, legato ---------- */
 
@@ -350,9 +414,18 @@ function isLegatoSlide(n){
 
 function atModel(name){ try { return window.alphaTab && window.alphaTab.model && window.alphaTab.model[name]; } catch(e){ return null; } }
 
+// Une grace note est-elle une acciaccatura (barrée, jouée avant le temps) ? -> {/...}
+// BeforeBeat et BendGrace : barrées ; OnBeat (appoggiature) : non barrée -> {...}.
+function graceIsSlashed(beat){
+  const g = beat.graceType;
+  const GT = atModel('GraceType');
+  if (GT){ if (g === GT.BeforeBeat || g === GT.BendGrace) return true; if (g === GT.OnBeat) return false; }
+  return /before|bend/i.test(String(g));
+}
+
 // Annotations d'effets (stratégie A : on conserve la hauteur frettée et on signale l'effet en
 // texte au-dessus de la note). Le bend est encodé de façon ANALYSABLE par script :
-// "^bend=<demi-tons>"  (ex. "^bend=2" = monter d'un ton ; suffixe ";r" = bend puis relâché).
+// "^bend=<demi-tons>"  (ex. "^bend=2" = monter d'un ton ; suffixe " rel" = bend puis relâché).
 // alphaTab stocke la valeur de bend en quarts de ton -> demi-tons = valeur/2.
 function effectAnnotations(beat, notes){
   let s = '';
@@ -366,7 +439,7 @@ function effectAnnotations(beat, notes){
       if (vals[vals.length - 1] < mx) releases = true;
     }
   });
-  if (peak > 0) s += '"^bend=' + String(peak / 2) + (releases ? ';r' : '') + '"';
+  if (peak > 0) s += '"^bend=' + String(peak / 2) + (releases ? ' rel' : '') + '"';
   // --- vibrato ---
   let vib = !!(beat.vibrato && beat.vibrato !== 0);
   if (!vib) vib = notes.some(n => n.vibrato && n.vibrato !== 0);
@@ -470,6 +543,31 @@ function classifyStaff(track, staff, si){
   return {clef:'treble', shift:0};
 }
 
+// Correction d'octave pour les pistes de FLÛTE notées une octave trop bas.
+// Cas vu sur des tablatures GP où la flûte est posée sur des frettes graves de guitare :
+// la « Flute 3-4 » de Stairway descend à Fa2 et plafonne à Mi4, ce qui est injouable à la
+// flûte (alors que « Flute 1-2 », correcte, va de La3 à Mi5). Le convertisseur reproduit
+// fidèlement le realValue de GP : on rattrape donc le décalage ici.
+// Garde-fous (pour ne JAMAIS toucher une piste correcte) :
+//  - famille flûte uniquement (nom OU programme GM 72-79, la famille « Pipe »),
+//  - clef mélodique non octaviée (shift 0 : exclut guitares treble-8 et basses bass-8),
+//  - toute la portée reste sous Do5 ET descend sous Do4 -> signal franc d'une octave perdue,
+//  - on remonte d'UNE seule octave (+12), jamais davantage.
+function fluteOctaveFix(track, staff, cls){
+  if (cls.shift !== 0 || cls.clef === 'perc' || cls.clef === 'bass') return 0;
+  const n = (track.name || '').toLowerCase();
+  const prog = track.playbackInfo && track.playbackInfo.program;
+  const isFlute = /flut|flûte|fife|piccolo|recorder|flageolet|pipeau|traversi/.test(n)
+               || (typeof prog === 'number' && prog >= 72 && prog <= 79);
+  if (!isFlute) return 0;
+  let mn = Infinity, mx = -Infinity;
+  (staff.bars || []).forEach(bar => (bar.voices || []).forEach(v => (v.beats || []).forEach(bt =>
+    (bt.notes || []).forEach(nt => { const m = noteMidi(nt, staff); if (m > 0){ if (m < mn) mn = m; if (m > mx) mx = m; } }))));
+  if (mx === -Infinity) return 0;
+  if (mx < 72 && mn < 60) return 12;   // Do5=72, Do4=60 : tessiture entière une octave trop bas
+  return 0;
+}
+
 // Nom de voie : « Piste (MD)/(MG) » pour les 2 mains, « v1/v2 » si plusieurs voix sur une portée.
 function laneName(track, nStaves, si, usedVoices, vi){
   let base = sanitize(track.name) || 'Piste';
@@ -545,6 +643,14 @@ function buildBarBody(bar, vi, ctx){
   let outStr = '';
   let tupLeft = 0;
   let slurOpen = false;   // liaison de phrasé (legato) en cours
+  // Regroupement des grace notes consécutives en un seul groupe ABC, accolé à la note qui suit.
+  let graceBuf = '', graceSlash = false;
+  const graceFlush = () => {
+    if (!graceBuf) return '';
+    const g = '{' + (graceSlash ? '/' : '') + graceBuf + '}';
+    graceBuf = ''; graceSlash = false;
+    return g;
+  };
 
   // Ce beat enchaîne-t-il en legato vers le beat suivant (hammer-on / pull-off / slide lié) ?
   const legatoOut = (b) => {
@@ -556,7 +662,9 @@ function buildBarBody(bar, vi, ctx){
     const beat = beats[i];
     const isGrace = graceOf(beat);
     // Les notes mortes (« x ») d'un ornement n'ont pas de hauteur réelle -> on les retire.
-    const notes = isGrace ? (beat.notes || []).filter(n => !isDead(n)) : (beat.notes || []);
+    let notes = isGrace ? (beat.notes || []).filter(n => !isDead(n)) : (beat.notes || []);
+    // Batterie : on ne garde que les frappes dont le son GM est mappé (les autres -> silence).
+    if (ctx.perc && ctx.percNote) notes = notes.filter(n => ctx.percNote(n.realValue) != null);
 
     // Ouverture d'un n-olet (sur beat sonnant, hors ornement).
     if (!isGrace && tupLeft === 0){
@@ -567,6 +675,7 @@ function buildBarBody(bar, vi, ctx){
 
     if (beat.isRest || !notes.length){
       if (isGrace) continue;                     // ornement vide / mort -> ignoré
+      outStr += graceFlush();                     // grace en attente -> émise avant le silence (rare)
       if (slurOpen){ outStr += ')'; slurOpen = false; }   // un silence interrompt le legato
       outStr += 'z' + beatLength(beat, ctx.Lden, inTup);
       advance(beat);
@@ -575,8 +684,15 @@ function buildBarBody(bar, vi, ctx){
       continue;
     }
 
-    const pitches = notes.map(n => spell(noteMidi(n, ctx.staff) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
-    if (isGrace){ outStr += '{' + pitches.join('') + '}'; continue; }
+    const pitches = (ctx.perc && ctx.percNote)
+      ? notes.map(n => ctx.percNote(n.realValue))
+      : notes.map(n => spell(noteMidi(n, ctx.staff) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
+    // Grace note : on accumule ses hauteurs ; le groupe {…} sera accolé à la prochaine note réelle.
+    if (isGrace){
+      if (!graceBuf) graceSlash = graceIsSlashed(beat);   // type pris sur la 1re grace du groupe
+      graceBuf += pitches.join('');
+      continue;
+    }
 
     // Symbole d'accord (diagramme nommé en Guitar Pro) -> "Am", "Cmaj7"…
     let chordSym = '';
@@ -595,16 +711,25 @@ function buildBarBody(bar, vi, ctx){
     }
 
     const len = beatLength(beat, ctx.Lden, inTup);
-    let tok = pitches.length === 1 ? pitches[0] + len : '[' + pitches.join('') + ']' + len;
-    // Liaison de tenue : uniquement si une hauteur liée se retrouve sur le beat suivant
-    // (sinon la note tenue chevauche d'autres notes -> pas de liaison erronée vers une autre note).
-    const ties = notes.filter(n => n.isTieOrigin).map(n => noteMidi(n, ctx.staff));
-    if (ties.length){
-      const nxt = nextSounding(i);
-      if (nxt === undefined || (nxt && ties.some(m => nxt.indexOf(m) >= 0))) tok += '-';
+    // Liaison de tenue PAR HAUTEUR : une note n'est liée que si sa hauteur se retrouve sur le beat
+    // suivant (ou en fin de mesure, où la tenue se poursuit sur la mesure suivante). Dans un accord,
+    // le tiret se place après CHAQUE hauteur tenue ([c-F]) et non après l'accord entier ([cF]-),
+    // ce qui évite les « bad tie » quand seule une partie de l'accord se prolonge.
+    const nxt = nextSounding(i);
+    const isTied = (n) => {
+      if (!n || !n.isTieOrigin) return false;
+      const m = (ctx.perc && ctx.percNote) ? n.realValue : noteMidi(n, ctx.staff);
+      return (nxt === undefined) || (!!nxt && nxt.indexOf(m) >= 0);
+    };
+    let tok;
+    if (pitches.length === 1){
+      tok = pitches[0] + len + (isTied(notes[0]) ? '-' : '');
+    } else {
+      const inner = pitches.map((p, k) => p + (isTied(notes[k]) ? '-' : '')).join('');
+      tok = '[' + inner + ']' + len;
     }
-    // Ordre ABC : [ouverture legato]["accord"][annotations effets][décorations][note]
-    outStr += (openHere ? '(' : '') + chordSym + effAnn + decos + tok;
+    // Ordre ABC : [ouverture legato]["accord"][annotations effets][décorations]{grace}[note]
+    outStr += (openHere ? '(' : '') + chordSym + effAnn + decos + graceFlush() + tok;
     // Ferme la liaison de phrasé sur le 1er beat qui n'enchaîne plus.
     if (slurOpen && !legatoOut(beat)){ outStr += ')'; slurOpen = false; }
     syll.push(lyricOf(beat));                     // une syllabe par note émise
@@ -613,6 +738,7 @@ function buildBarBody(bar, vi, ctx){
     if (tupLeft > 0) tupLeft--;
     if (tupLeft === 0 && atBeatBoundary() && i < beats.length - 1) outStr += ' ';
   }
+  outStr += graceFlush();        // grace(s) en fin de mesure sans note suivante (rare)
   if (slurOpen) outStr += ')';   // sécurité : parenthèses toujours équilibrées
   if (!outStr) return { body: fullBarRest(ctx.curN, ctx.curD, ctx.Lden), syll };
   return { body: outStr, syll };
@@ -759,6 +885,20 @@ function scoreToAbc(score){
 
   const tracks = (score.tracks || []).filter(t => t.staves && t.staves.length);
 
+  // Coupures de ligne COMMUNES à toutes les voix (pour que les systèmes restent alignés) :
+  // début de chaque section, et au plus 4 mesures par ligne. Les repères de section sont émis
+  // hors de la ligne de musique (champ P:), car en annotation "^..." ils peuvent faire planter
+  // le moteur de rendu (abcm2ps/EasyABC) sur les gros fichiers.
+  const nbBars = (mbars && mbars.length) ? mbars.length : 0;
+  const sectionOf = bi => { const s = barStruct(mbars[bi] || mb0).section; return s ? sanitize(s) : null; };
+  const segments = [];
+  for (let i = 0; i < nbBars; ){
+    const start = i, sec = sectionOf(i);
+    i++;
+    while (i < nbBars && !sectionOf(i) && (i - start) < 4) i++;
+    segments.push({ start, end: i, section: sec });
+  }
+
   let vnum = 0;
   const scoreGroups = [];   // pour %%score : un groupe de n° de voix par piste (accolade si >1)
   tracks.forEach((track) => {
@@ -771,12 +911,33 @@ function scoreToAbc(score){
       const staffHasNotes = bars.some(b => (b.voices || []).some(v => (v && v.beats || []).some(bt => !bt.isRest && bt.notes && bt.notes.length)));
       if (!staffHasNotes && !(tracks.length === 1 && staves.length === 1)) return;
       const cls = classifyStaff(track, staff, si);
+      const octFix = fluteOctaveFix(track, staff, cls);
+      if (octFix) cls.shift += octFix;
 
       usedVoices.forEach((vi) => {
         vnum++;
         trackVnums.push(vnum);
         const firstLane = (vnum === 1);   // repères de section uniquement sur la 1re voix (portée du haut)
+        const isPerc = (cls.clef === 'perc');
         out.push('V:' + vnum + ' clef=' + cls.clef + ' name="' + laneName(track, staves.length, si, usedVoices, vi) + '"');
+
+        // Batterie : on recense les sons GM utilisés, on assigne une note ABC + tête à chacun,
+        // et on émet %%percmap (position/tête) + %%MIDI drummap (son) pour cette voix.
+        let percNote = null;
+        if (isPerc){
+          const usedGm = new Set();
+          bars.forEach(bar => (bar.voices || []).forEach(v => (v.beats || []).forEach(bt =>
+            (bt.notes || []).forEach(n => { const m = n.realValue; if (typeof m === 'number' && m > 0) usedGm.add(m); }))));
+          const assign = buildPercAssign(usedGm);
+          percNote = (gm) => { const a = assign.get(gm); return a ? a.abc : null; };
+          Array.from(usedGm).sort((a, b) => a - b).forEach(gm => {
+            const a = assign.get(gm); if (!a) return;
+            out.push('%%percmap ' + a.abc + ' ' + gm + (a.head ? ' ' + a.head : '') + (PERC_NAMES[gm] ? '   % ' + PERC_NAMES[gm] : ''));
+          });
+          Array.from(usedGm).sort((a, b) => a - b).forEach(gm => {
+            const a = assign.get(gm); if (a) out.push('%%MIDI drummap ' + a.abc + ' ' + gm);
+          });
+        }
 
         let curN = tsN, curD = tsD, curKs = ks, curTempo = headerTempo;
         const dyn = { cur: null };   // nuance courante, persistante sur toute la voix
@@ -798,7 +959,8 @@ function scoreToAbc(score){
           // Armure de la mesure : valeur du fichier, ou armure effective (déduite) si le fichier
           // ne renseigne rien (toutes mesures à 0). Corrige le spelling ET émet [K:] aux changements.
           const rawKs = (typeof mb.keySignature === 'number') ? mb.keySignature : 0;
-          const barKs = (fileKs === 0 && rawKs === 0) ? ks : rawKs;
+          let barKs = (fileKs === 0 && rawKs === 0) ? ks : rawKs;
+          if (isPerc) barKs = 0;   // batterie : pas d'armure -> notes percmap littérales (un [K:C] sera émis si besoin)
           const barKeyAlter = makeKeyAlter(barKs);
           // Préfixe : métrique + armure + tempo + repère de section + directions
           let pre = '';
@@ -811,28 +973,29 @@ function scoreToAbc(score){
             const bt = tempoMap[bi];
             if (typeof bt === 'number' && bt !== curTempo){ pre += '[Q:1/4=' + bt + ']'; curTempo = bt; }
           }
-          if (firstLane && st.section) pre += '"^' + st.section.replace(/"/g, "'") + '"';
           st.dirs.forEach(d => { pre += '!' + d + '!'; });
-          const r = buildBarBody(bars[bi], vi, {ks: barKs, keyAlter: barKeyAlter, cls, staff, Lden, curN, curD, dyn});
+          const r = buildBarBody(bars[bi], vi, {ks: barKs, keyAlter: barKeyAlter, cls, staff, Lden, curN, curD, dyn, perc: isPerc, percNote});
           units.push((sep ? sep + ' ' : '') + pre + r.body);
           sylls.push(r.syll);
           if (r.syll.some(s => s !== '*')) hasLyr = true;
         }
         const lastSt = barStruct(mbars[bars.length-1] || mb0);
         const endBar = lastSt.close ? ' :|' : ' |';
-        // 4 mesures par ligne ; la barre finale termine la dernière ligne.
-        // Si la voix porte des paroles, une ligne w: suit chaque ligne de musique (barres alignées).
-        for (let k = 0; k < units.length; k += 4){
-          let line = units.slice(k, k + 4).join(' ');
-          if (k + 4 >= units.length) line += endBar;
+        // Une ligne de musique par segment (coupure aux débuts de section, sinon 4 mesures max).
+        // Le nom de section est émis hors de la ligne (P:) sur la voix du haut uniquement.
+        // Si la voix porte des paroles, une ligne w: suit chaque ligne (barres alignées).
+        segments.forEach((seg, idx) => {
+          if (firstLane && seg.section) out.push('P:' + seg.section);
+          let line = units.slice(seg.start, seg.end).join(' ');
+          if (idx === segments.length - 1) line += endBar;
           out.push(line);
           if (hasLyr){
-            const seg = sylls.slice(k, k + 4)
+            const sg = sylls.slice(seg.start, seg.end)
               .map(a => (a.length ? a.join(' ') : '*'))
               .join(' | ');
-            out.push('w: ' + seg);
+            out.push('w: ' + sg);
           }
-        }
+        });
         // PAS de ligne vide entre les voix : en ABC une ligne vide = fin du morceau.
       });
     });
@@ -843,8 +1006,8 @@ function scoreToAbc(score){
   // même piste, crochet [] autour de l'ensemble). Inséré juste avant la 1re ligne V:.
   if (vnum >= 2){
     const groups = scoreGroups.map(g => g.length > 1
-      ? '{' + g.map(v => 'V' + v).join(' ') + '}'
-      : 'V' + g[0]);
+      ? '{' + g.map(v => String(v)).join(' ') + '}'
+      : String(g[0]));
     const directive = '%%score [' + groups.join(' ') + ']';
     const vidx = out.findIndex(l => l.indexOf('V:') === 0);
     if (vidx >= 0) out.splice(vidx, 0, directive); else out.push(directive);
