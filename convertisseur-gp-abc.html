@@ -5,7 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ============================================================
      GP → ABC · Convertisseur de tablatures Guitar Pro
-     Version : v1.13  (batterie Guitar Pro 6/7/8 : le numéro de frappe est l'index d'une articulation du kit,
+     Version : v1.20  (accents des GP3 / GP4 : dans ces deux formats, le bit 0x02 d’une note dit « note
+     pointée » ; alphaTab le lit comme un accent lourd, d’où des milliers de !marcato! sur les notes pointées
+     (4 454 sur 4 511 dans les GP3/GP4 d’essai). Il n’est plus écrit pour un GP3 ou un GP4 ; MuseScore
+     l’ignore aussi dans ces formats. Le GP5 et les suivants ne changent pas).
+     Détail v1.19 : (harmoniques : une harmonique artificielle à l’octave (+12) s’écrit sur la case pressée
+     avec !octv! — l’octavado de SaisieABC, qui sonne une octave au-dessus quelle que soit la case — et la
+     ligne d’en-tête %%deco octv ; les autres (naturelles, pincées, semi) gardent leur hauteur réelle et le
+     texte "^harm", car un .abc ne dit pas sur quelle corde les jouer).
+     Détail v1.18 : (mesures vides : Guitar Pro range une mesure vide d’une voix comme un seul temps « vide »
+     (souvent d’une noire) ; il devient un silence de mesure entière, sinon la voix prenait de l’avance
+     sur les autres à l’écoute — ex. la basse de La corrida, entrée 4 mesures trop tôt).
+     Détail v1.17 : (notes mortes : un accord ou une note tout mort prend !head-x! — x dans la tablature
+     de SaisieABC 4.621+, tête en croix sur la portée — avec la ligne d’en-tête %%deco head-x 0 dsh0 0 0 0 ;
+     dans un accord mêlé, les cordes mortes sont retirées et les vraies notes restent ; le texte "^x" disparaît).
+     Détail v1.16 : (glissés : vers la note suivante "^sl." — « legato » dans la liaison, « shift » sans
+     liaison car l’arrivée est rejouée ; entrées "</" (par le grave) / "<\\" (par l’aigu), sorties ">/"
+     (vers l’aigu) / ">\\" (vers le grave), à la place des textes "^sl.up" / "^sl.dn" ; SaisieABC 4.622+).
+     Détail v1.15 : (hammer-on / pull-off : "^H" si la note d’arrivée monte, "^P" si elle descend,
+     posé sur la note de départ, dans la liaison qui existait déjà ; SaisieABC 4.619+ en fait le lié
+     sans nouvelle attaque, avec H ou P sur la tablature).
+     Détail v1.14 : (le bend garde sa FORME : "^bend=2" monte, " rel" relâché, " pre" pré-bend,
+     " pre rel" pré-bend relâché, toute autre courbe écrite point par point "^bend=0:0 20:1 60:1" ;
+     SaisieABC 4.591+ en tire le son et l'affichage).
+     Détail v1.13 : (batterie Guitar Pro 6/7/8 : le numéro de frappe est l'index d'une articulation du kit,
      traduit en son General MIDI par son OutputMidiNumber ; l'index 0 (caisse claire) n'est plus perdu).
      Détail v1.12 : (batterie à la DISPOSITION MUSESCORE, la même que SaisieABC 4.584 : grosse caisse
      sur Fa4, caisse claire Do5, charleston Sol5 en croix, ride Fa5, crash La5, toms de Fa5 à Sol4 ;
@@ -122,7 +145,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Tab<em>→</em>ABC <span class="ver">v1.13</span></h1>
+    <h1>Tab<em>→</em>ABC <span class="ver">v1.20</span></h1>
     <div class="sub">Convertisseur <b>Guitar Pro</b> vers notation <b>ABC</b>.<br>Tout se passe dans le navigateur — aucun fichier n'est envoyé.</div>
   </header>
 
@@ -164,8 +187,8 @@
     Structure : <b>reprises</b> <code>|: :|</code>, <b>voltas</b>, <b>repères de section</b>, directions (D.C./D.S./Segno/Coda/Fine),
     <b>tempo</b> et <b>armure variables</b> en cours de morceau (<code>[Q:]</code>/<code>[K:]</code>), et <b>paroles</b> <code>w:</code> alignées. <b>Armure déduite des notes</b> si le fichier GP n'en précise pas (fréquent sur les tabs).
     Expression : <b>nuances</b> <code>!p!…!f!</code>, <b>articulations</b> (staccato, accent, marcato, fermata) et <b>legato</b>
-    (hammer-on / pull-off / slide → liaisons de phrasé <code>( )</code>).
-    Effets annotés en texte au-dessus de la note : <b>bend</b> <code>"^bend=2"</code> (demi-tons, suffixe <code> rel</code> si relâché), <b>vibrato</b>, <b>harmonique</b>, <b>note morte</b> <code>"^x"</code>, <b>slide</b>. La hauteur reste celle de la case (l'ABC standard ne note pas les micro-intervalles).
+    (hammer-on / pull-off → liaison <code>( )</code> avec <code>"^H"</code> / <code>"^P"</code> sur la note de départ ; glissé vers la note suivante <code>"^sl."</code>, dans la liaison s’il est « legato », sans liaison s’il est « shift » (arrivée rejouée) ; entrées <code>"</"</code> <code>"<\\"</code> et sorties <code>">/"</code> <code>">\\"</code>).
+    Effets annotés en texte au-dessus de la note : <b>bend</b> <code>"^bend=2"</code> (demi-tons ; <code> rel</code> relâché, <code> pre</code> pré-bend, sinon la courbe <code>"^bend=0:0 20:1 60:1"</code>), <b>vibrato</b>, <b>harmonique</b> (l’artificielle à l’octave devient <code>!octv!</code> sur la case pressée, l’octavado de SaisieABC). <b>Notes mortes</b> : <code>!head-x!</code> sur un accord tout mort (x dans la tablature, tête en croix) ; les cordes mortes d’un accord mêlé sont retirées. La hauteur reste celle de la case (l'ABC standard ne note pas les micro-intervalles).
   </footer>
 </div>
 
@@ -403,6 +426,16 @@ function dynName(beat){
 }
 
 // Niveau d'accent max sur un ensemble de notes -> décoration ABC ('' / !accent! / !marcato!).
+// v1.20 (GPOLD_V120) : le fichier est-il un GP3 ou un GP4 ? (en-tête « FICHIER GUITAR PRO v3.00 », v4.0x…)
+// Dans ces formats, le bit 0x02 d’une note marque une note pointée, pas un accent lourd.
+let GP_OLD = false;
+function gpOldFormat(bytes){
+  try {
+    const n = Math.min(bytes[0] | 0, 40), s = String.fromCharCode.apply(null, Array.from(bytes.slice(1, 1 + n)));
+    return /GUITAR PRO v[34]\./i.test(s);
+  } catch(e){ return false; }
+}
+
 function accentDeco(notes){
   let lvl = 0;
   let AT = null; try { AT = window.alphaTab && window.alphaTab.model && window.alphaTab.model.AccentuationType; } catch(e){}
@@ -413,21 +446,23 @@ function accentDeco(notes){
     else if (AT && (a === AT.Normal)) v = 1;
     else if (typeof a === 'number') v = a;             // None=0, Normal=1, Heavy=2
     else { const s = String(a).toLowerCase(); v = /heavy/.test(s) ? 2 : /normal/.test(s) ? 1 : 0; }
+    if (v === 2 && GP_OLD) v = 0;               // GPOLD_V120 : faux accent lourd d’un GP3 / GP4
     if (v > lvl) lvl = v;
   });
   return lvl === 2 ? '!marcato!' : lvl === 1 ? '!accent!' : '';
 }
 
-// Une note glisse-t-elle en legato vers la note suivante (slide « shift » ou « legato ») ?
+// Une note glisse-t-elle en legato vers la note suivante ? Seul le slide « legato » : le « shift »
+// rejoue la note d’arrivée, il n’a pas de liaison (v1.16, SLIDE_V116).
 function isLegatoSlide(n){
   const t = n.slideOutType;
   if (t == null) return false;
   try {
     const SO = window.alphaTab && window.alphaTab.model && window.alphaTab.model.SlideOutType;
-    if (SO) return (t === SO.Shift) || (t === SO.Legato);
+    if (SO) return (t === SO.Legato);
   } catch(e){}
   const s = String(t).toLowerCase();
-  return /shift|legato/.test(s);   // si l'énum n'est pas résoluble, on ne se fie qu'au nom
+  return /legato/.test(s);   // si l'énum n'est pas résoluble, on ne se fie qu'au nom
 }
 
 function atModel(name){ try { return window.alphaTab && window.alphaTab.model && window.alphaTab.model[name]; } catch(e){ return null; } }
@@ -445,40 +480,61 @@ function graceIsSlashed(beat){
 // texte au-dessus de la note). Le bend est encodé de façon ANALYSABLE par script :
 // "^bend=<demi-tons>"  (ex. "^bend=2" = monter d'un ton ; suffixe " rel" = bend puis relâché).
 // alphaTab stocke la valeur de bend en quarts de ton -> demi-tons = valeur/2.
+// v1.14 : courbe alphaTab (offset 0-60, valeur en quarts de ton) -> forme nommee ou points.
+// Les quatre formes nommees sont celles que SaisieABC rejoue a l'identique.
+function bendCode(bp){
+  const P = bp.map(p => [Math.round(+p.offset || 0), (+p.value || 0) / 2]);
+  const A = Math.max.apply(null, P.map(p => p[1]));
+  if (!(A > 0)) return '';
+  const fmt = v => String(Math.round(v * 100) / 100);
+  const SH = [['', [[0,0],[30,A],[60,A]]], [' rel', [[0,0],[15,A],[30,A],[45,0],[60,0]]],
+              [' pre', [[0,A],[60,A]]], [' pre rel', [[0,A],[20,A],[40,0],[60,0]]]];
+  for (const [nm, q] of SH){
+    if (q.length === P.length && q.every((x, k) => x[0] === P[k][0] && Math.abs(x[1] - P[k][1]) < 1e-9)) return fmt(A) + nm;
+  }
+  return P.map(p => p[0] + ':' + fmt(p[1])).join(' ');
+}
 function effectAnnotations(beat, notes){
   let s = '';
-  // --- bend : pic maximal sur les notes du beat ---
-  let peak = 0, releases = false;
-  notes.forEach(n => {
-    if (n.hasBend && n.bendPoints && n.bendPoints.length){
-      const vals = n.bendPoints.map(p => (+p.value || 0));
-      const mx = Math.max.apply(null, vals);
-      if (mx > peak) peak = mx;
-      if (vals[vals.length - 1] < mx) releases = true;
-    }
-  });
-  if (peak > 0) s += '"^bend=' + String(peak / 2) + (releases ? ' rel' : '') + '"';
+  // --- bend : la forme de la courbe de la 1re note bendee du beat (BENDFORM_V114) ---
+  let bendTxt = '';
+  notes.forEach(n => { if (!bendTxt && n.hasBend && n.bendPoints && n.bendPoints.length) bendTxt = bendCode(n.bendPoints); });
+  if (bendTxt) s += '"^bend=' + bendTxt + '"';
+  // --- hammer-on / pull-off (HOPO_V115) : sur la note de depart, "^H" si la note d'arrivee
+  //     monte, "^P" si elle descend (la 1re note d'origine du beat, hors note morte). ---
+  const hpN = notes.find(n => n && n.isHammerPullOrigin === true && n.isDead !== true);
+  if (hpN){
+    let up = true;
+    try { const d = hpN.hammerPullDestination; if (d) up = noteMidi(d, null) >= noteMidi(hpN, null); } catch(e){}
+    s += up ? '"^H"' : '"^P"';
+  }
   // --- vibrato ---
   let vib = !!(beat.vibrato && beat.vibrato !== 0);
   if (!vib) vib = notes.some(n => n.vibrato && n.vibrato !== 0);
   if (vib) s += '"^vib"';
   // --- harmonique ---
-  if (notes.some(n => n.harmonicType && n.harmonicType !== 0)) s += '"^harm"';
-  // --- note morte / étouffée (on garde la hauteur et on la marque) ---
-  if (notes.some(n => n.isDead === true)) s += '"^x"';
-  // --- slides non liés (les « shift »/« legato » sont déjà rendus en liaison de phrasé) ---
+  if (!isOctavado(notes) && notes.some(n => n.harmonicType && n.harmonicType !== 0)) s += '"^harm"';
+  // --- note morte : depuis la v1.17 (DEADX_V117), plus de texte "^x" ; buildBarBody pose !head-x!
+  //     sur un beat tout mort et retire les cordes mortes d'un accord mêlé. ---
+  // --- glissés (SLIDE_V116), écriture SaisieABC 4.622+ : vers la note suivante "^sl." (shift ou
+  //     legato ; seul le legato est dans la liaison) ; entrée par le grave "</" / par l'aigu "<\\" ;
+  //     sortie vers l'aigu ">/" / vers le grave ">\\". Une marque de chaque sorte par beat ; le
+  //     glissé vers la suivante cède au hammer-on / pull-off et passe avant une sortie. ---
   const SI = atModel('SlideInType'), SO = atModel('SlideOutType');
-  let up = false, down = false;
+  let toNext = false, inUp = false, inDown = false, outUp = false, outDown = false;
   notes.forEach(n => {
+    if (!n || n.isDead === true) return;
     const si = n.slideInType, so = n.slideOutType;
-    if (si && SI){ if (si === SI.IntoFromBelow) up = true; else if (si === SI.IntoFromAbove) down = true; }
+    if (si && SI){ if (si === SI.IntoFromBelow) inUp = true; else if (si === SI.IntoFromAbove) inDown = true; }
     if (so && SO){
-      if (so === SO.OutUp || so === SO.PickSlideUp) up = true;
-      else if (so === SO.OutDown || so === SO.PickSlideDown) down = true;
+      if (so === SO.Shift || so === SO.Legato) toNext = true;
+      else if (so === SO.OutUp || so === SO.PickSlideUp) outUp = true;
+      else if (so === SO.OutDown || so === SO.PickSlideDown) outDown = true;
     }
   });
-  if (up) s += '"^sl.up"';
-  if (down) s += '"^sl.dn"';
+  if (inUp) s += '"</"'; else if (inDown) s += '"<\\\\"';
+  if (toNext){ if (!hpN) s += '"^sl."'; }
+  else if (outUp) s += '">/"'; else if (outDown) s += '">\\\\"';
   return s;
 }
 
@@ -597,11 +653,24 @@ function laneName(track, nStaves, si, usedVoices, vi){
 // Corps ABC d'UNE mesure pour une voie (portée, voix).
 // Retourne { body, syll } : body = chaîne ABC ; syll = une syllabe par note émise
 // (silences exclus), dans l'ordre, pour construire la ligne w: alignée.
+// v1.19 (OCTV_V119) : un beat dont toutes les notes sont des harmoniques artificielles à l’octave
+// (+12 sur la case pressée) s’écrit sur la case pressée avec !octv! (octavado de SaisieABC).
+function isOctavado(notes){
+  const HT = atModel('HarmonicType');
+  const ART = (HT && HT.Artificial !== undefined) ? HT.Artificial : 2;
+  return !!(notes && notes.length) && notes.every(n => {
+    try { return n && n.harmonicType === ART && typeof n.realValueWithoutHarmonic === 'number'
+                 && (n.realValue - n.realValueWithoutHarmonic) === 12; } catch(e){ return false; }
+  });
+}
+
 function buildBarBody(bar, vi, ctx){
   const voice = (bar && bar.voices && bar.voices[vi]) ? bar.voices[vi] : null;
   const beats = voice ? (voice.beats || []) : [];
   const syll = [];
-  if (!beats.length) return { body: fullBarRest(ctx.curN, ctx.curD, ctx.Lden), syll };
+  // v1.18 (EMPTYBAR_V118) : une mesure dont la voix n'a que des temps « vides » de Guitar Pro (souvent
+  // une noire de remplissage) est un silence de mesure entière, pas un silence de la durée de ce temps.
+  if (!beats.length || beats.every(b => b && b.isEmpty === true)) return { body: fullBarRest(ctx.curN, ctx.curD, ctx.Lden), syll };
   const state = new Map();   // report d'altération, remis à zéro à chaque mesure
   const isDead = n => n && (n.isDead === true || (n.type && /dead/i.test(String(n.type))));
   const graceOf = b => { const g = b && b.graceType; return g !== undefined && g !== null && String(g) !== '0' && String(g).toLowerCase() !== 'none'; };
@@ -681,6 +750,13 @@ function buildBarBody(bar, vi, ctx){
     const isGrace = graceOf(beat);
     // Les notes mortes (« x ») d'un ornement n'ont pas de hauteur réelle -> on les retire.
     let notes = isGrace ? (beat.notes || []).filter(n => !isDead(n)) : (beat.notes || []);
+    // v1.17 (DEADX_V117) : beat tout mort -> !head-x! (hauteurs gardées) ; accord mêlé -> on ne garde
+    // que les vraies notes. La batterie n'est pas concernée.
+    let allDead = false;
+    if (!isGrace && !(ctx.perc && ctx.percNote) && notes.length){
+      const live = notes.filter(n => !isDead(n));
+      if (!live.length) allDead = true; else if (live.length < notes.length) notes = live;
+    }
     // Batterie : on ne garde que les frappes dont le son GM est mappé (les autres -> silence).
     if (ctx.perc && ctx.percNote) notes = notes.filter(n => ctx.percNote(n) != null);
 
@@ -702,9 +778,10 @@ function buildBarBody(bar, vi, ctx){
       continue;
     }
 
+    const octv = !isGrace && !(ctx.perc && ctx.percNote) && isOctavado(notes);   // OCTV_V119
     const pitches = (ctx.perc && ctx.percNote)
       ? notes.map(n => ctx.percNote(n))
-      : notes.map(n => spell(noteMidi(n, ctx.staff) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
+      : notes.map(n => spell((octv ? n.realValueWithoutHarmonic : noteMidi(n, ctx.staff)) + ctx.cls.shift, ctx.ks, ctx.keyAlter, state, isGrace));
     // Grace note : on accumule ses hauteurs ; le groupe {…} sera accolé à la prochaine note réelle.
     if (isGrace){
       if (!graceBuf) graceSlash = graceIsSlashed(beat);   // type pris sur la 1re grace du groupe
@@ -747,7 +824,7 @@ function buildBarBody(bar, vi, ctx){
       tok = '[' + inner + ']' + len;
     }
     // Ordre ABC : [ouverture legato]["accord"][annotations effets][décorations]{grace}[note]
-    outStr += (openHere ? '(' : '') + chordSym + effAnn + decos + graceFlush() + tok;
+    outStr += (openHere ? '(' : '') + chordSym + effAnn + decos + (allDead ? '!head-x!' : '') + (octv ? '!octv!' : '') + graceFlush() + tok;
     // Ferme la liaison de phrasé sur le 1er beat qui n'enchaîne plus.
     if (slurOpen && !legatoOut(beat)){ outStr += ')'; slurOpen = false; }
     syll.push(lyricOf(beat));                     // une syllabe par note émise
@@ -1031,6 +1108,16 @@ function scoreToAbc(score){
     if (vidx >= 0) out.splice(vidx, 0, directive); else out.push(directive);
   }
 
+  // v1.17 (DEADX_V117) : la tête en croix est déclarée dans l'en-tête, comme le fait SaisieABC.
+  if (out.some(l => l.indexOf('!head-x!') >= 0)){
+    const kidx = out.findIndex(l => l.indexOf('K:') === 0);
+    out.splice(kidx >= 0 ? kidx : out.length, 0, '%%deco head-x 0 dsh0 0 0 0');
+  }
+  // v1.19 (OCTV_V119) : l'octavado déclaré dans l'en-tête, comme le fait SaisieABC.
+  if (out.some(l => l.indexOf('!octv!') >= 0)){
+    const kidx = out.findIndex(l => l.indexOf('K:') === 0);
+    out.splice(kidx >= 0 ? kidx : out.length, 0, '%%deco octv 3 crdc 20 0 20 octv.');
+  }
   if (!vnum) out.push('% Aucune piste exploitable trouvée dans le fichier.');
   return out.join('\n').replace(/\n{2,}/g, '\n').trim() + '\n';
 }
@@ -1095,6 +1182,7 @@ function handleFile(file){
   reader.onload = () => {
     try {
       const bytes = new Uint8Array(reader.result);
+      GP_OLD = gpOldFormat(bytes);               // GPOLD_V120
       const score = loadScore(bytes);
       const abc = scoreToAbc(score);
       abcEl.value = abc;
